@@ -1,0 +1,4 @@
+# dsh-phone client plugin — 挂到 browser roster（dsh.client rows = 浏览器插件名册）
+- insert:
+    - id: dsh-phone
+      name: '@wwumit/dsh-phone'

@@ -1,0 +1,49 @@
+{
+  "name": "@wwumit/dsh-phone",
+  "version": "0.1.0",
+  "description": "Agent phone client plugin — phone dialer overlay in DSH web UI, consuming CHA2A phone directory",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "watch": "tsdown --watch"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "agent-phone",
+    "cha2a",
+    "cordis"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=3.0.0",
+    "@deepseek-ai/dsh-client-runtime": ">=0.1.0"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "tsdown": "latest",
+    "typescript": "^5.6.0",
+    "@types/react": "^18.0.0"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web"
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
