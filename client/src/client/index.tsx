@@ -8,7 +8,7 @@
  * 共享状态：dshPhone 服务（ctx.provide）持有浮窗 open/number 的 snapshot store，
  * overlay 组件（useSyncExternalStore 订阅）与命令（onSelect 写）联动。
  */
-import { useRef, useState, useSyncExternalStore } from 'react'
+import React, { useRef, useState, useSyncExternalStore } from 'react'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
@@ -114,10 +114,11 @@ const UNLOCKED_KEY = 'dsh-phone-unlocked'
 // ── 电话面板（单部电话完整画面：拨号盘 + 来电/通话 + 独立短信窗）────
 
 interface SmsMsg {
-  from: 'A' | 'B'
+  fromNumber: string       // 发送方号码（等于本机号码=自己→右，否则对端→左）
   text?: string
-  attachment?: { name: string; size: number; type: string; url: string; hash?: string }
+  attachment?: { name: string; size: number; type: string; url?: string; fileId?: string; hash?: string }
   ts: number
+  seq?: number
 }
 
 function PhonePanel(props: {
@@ -215,8 +216,9 @@ function PhonePanel(props: {
   }
 
   const target = local?.num ?? '+86'
-  const mine = props.smsList.filter((m) => m.from === props.id)
-  const theirs = props.smsList.filter((m) => m.from !== props.id)
+  const isMine = (m: SmsMsg) => m.fromNumber === props.ownNumber
+  const mySms = props.smsList.filter(isMine)
+  const peerSms = props.smsList.filter((m) => !isMine(m))
 
   function dial(): void {
     if (target === '+86') return
@@ -507,17 +509,18 @@ function PhonePanel(props: {
               <div style={{ borderTop: '1px solid #2c2c2e', paddingTop: 8, marginTop: 6 }}>
                 <div style={{ fontSize: 10, color: t.sub, marginBottom: 4 }}>💬 短信（我 ↔ 对端）</div>
                 <div style={{ maxHeight: 92, overflowY: 'auto', marginBottom: 6 }}>
-                  {mine.length === 0 && theirs.length === 0 ? <div style={{ fontSize: 11, color: t.muted }}>暂无消息</div> : null}
-                  {[...theirs, ...mine].sort((a, b) => a.ts - b.ts).map((m, i) => (
-                    <div key={i} style={{ fontSize: 12, marginBottom: 4, textAlign: m.from === props.id ? 'right' : 'left' }}>
+                  {mySms.length === 0 && peerSms.length === 0 ? <div style={{ fontSize: 11, color: t.muted }}>暂无消息</div> : null}
+                  {[...peerSms, ...mySms].sort((a, b) => a.ts - b.ts).map((m, i) => (
+                    <div key={i} style={{ fontSize: 12, marginBottom: 4, textAlign: isMine(m) ? 'right' : 'left' }}>
+                      <div style={{ fontSize: 9, color: t.sub, marginBottom: 1 }}>{isMine(m) ? '我' : m.fromNumber}</div>
                       <span style={{ display: 'inline-block', padding: '5px 11px', borderRadius: 15, maxWidth: '85%',
-                        background: m.from === props.id ? t.msgMine : t.msgOther, color: '#fff',
-                        borderTopRightRadius: m.from === props.id ? 4 : 15, borderTopLeftRadius: m.from === props.id ? 15 : 4 }}>
+                        background: isMine(m) ? t.msgMine : t.msgOther, color: t.text,
+                        borderTopRightRadius: isMine(m) ? 4 : 15, borderTopLeftRadius: isMine(m) ? 15 : 4 }}>
                         {m.attachment ? (
                           <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 4 }}>
-                            {m.attachment.type.startsWith('image/')
+                            {m.attachment && m.attachment.url && (m.attachment.type.startsWith('image/') || /\.(png|jpe?g|gif|webp)$/i.test(m.attachment.name || ''))
                               ? <img src={m.attachment.url} alt={m.attachment.name} style={{ maxWidth: 140, maxHeight: 90, borderRadius: 8, display: 'block' }} />
-                              : <span style={{ fontSize: 11 }}>📄 {m.attachment.name}（{(m.attachment.size / 1024).toFixed(1)}KB）</span>}
+                              : <span style={{ fontSize: 11 }}>📄 {m.attachment ? m.attachment.name : ''}（{m.attachment ? (m.attachment.size / 1024).toFixed(1) : 0}KB）</span>}
                             <span style={{ fontSize: 8, color: t.sub }} title="SHA-256 前 16 位">#{m.attachment.hash}</span>
                           </span>
                         ) : m.text}
@@ -552,21 +555,53 @@ function PhoneOverlay(): JSX.Element {
   const [unlocked, setUnlocked] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem(UNLOCKED_KEY) || '[]') } catch { return [] } })
   function themeOf(id: 'A' | 'B'): Theme { return THEMES[(id === 'A' ? themeA : themeB)] || THEMES.classic }
   const [smsLog, setSmsLog] = useState<SmsMsg[]>([])
-  const [voice, setVoice] = useState<VoiceSession | null>(null)
   const [groupMsgs, setGroupMsgs] = useState<Array<{ from: string; text: string; ts: number }>>([])
   // 共享通话状态：A 拨 B → 唤起 B（B 自动打开显示来电）
   const [call, setCall] = useState<{ stage: 'ringing' | 'connected'; callerId: 'A' | 'B'; calleeId: 'A' | 'B'; call?: any; connectedAt: number } | null>(null)
 
-  function sendSms(from: 'A' | 'B', text?: string, attachment?: SmsMsg['attachment']): void {
-    setSmsLog((l) => [...l, { from, text, attachment, ts: Date.now() }])
-    setTimeout(() => {
-      setSmsLog((l) => [...l, {
-        from: (from === 'A' ? 'B' : 'A') as 'A' | 'B',
-        text: attachment ? `已收到附件：${attachment.name}` : `已收到：${(text || '').length > 12 ? text!.slice(0, 12) + '…' : text}`,
-        ts: Date.now(),
-      }])
-    }, 600)
+  const [lastSeq, setLastSeq] = useState(0)
+  const MINE_NUM = { A: '+86 95123 0001', B: '+86 95123 0002' } as Record<'A' | 'B', string>
+  const PEER_NUM = { A: '+86 95123 0002', B: '+86 95123 0001' } as Record<'A' | 'B', string>
+
+  // 短信经中继发送（registry 投递 + 收件箱；同页与跨设备同链路）
+  async function sendSms(from: 'A' | 'B', text?: string, attachment?: SmsMsg['attachment']): Promise<void> {
+    const to = PEER_NUM[from]
+    let att = attachment
+    if (attachment && !attachment.fileId) {
+      // 先上传附件拿 fileId
+      try {
+        const buf = await (await fetch(attachment.url!)).blob()
+        const b64 = await new Promise<string>((res) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.readAsDataURL(buf) })
+        const up = await (await fetch(`${PHONE_BASE}/api/v1/phone/attachment`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ did: AGENT_DID, name: attachment.name, mime: attachment.type, data: b64 }) })).json()
+        if (up.ok) att = { ...attachment, fileId: up.fileId, hash: up.hash }
+      } catch { return }
+    }
+    const body: any = { from: AGENT_DID, fromNumber: MINE_NUM[from], to, text: text || undefined, attachment: att ? { fileId: att.fileId, name: att.name, size: att.size, hash: att.hash } : undefined }
+    try { await fetch(`${PHONE_BASE}/api/v1/phone/message`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }) } catch { return }
+    setSmsLog((l) => [...l, { fromNumber: MINE_NUM[from], text, attachment: att, ts: Date.now() }])
   }
+
+  // 轮询收件箱（增量，seq 游标；5s）
+  React.useEffect(() => {
+    const poll = async () => {
+      try {
+        const d = await (await fetch(`${PHONE_BASE}/api/v1/phone/messages?did=${encodeURIComponent(AGENT_DID)}&since=${lastSeq}`, { headers: { Accept: 'application/json' }, cache: 'no-store' })).json()
+        if (d.messages && d.messages.length) {
+          setLastSeq(Math.max(...d.messages.map((m: any) => m.seq || 0)))
+          setSmsLog((l) => [...l, ...d.messages.filter((m: any) => !m.signal).map((m: any) => ({
+            fromNumber: m.fromNumber || '对端', text: m.text || undefined,
+            attachment: m.attachment ? { name: m.attachment.name, size: m.attachment.size, hash: m.attachment.hash, fileId: m.attachment.fileId, url: `${PHONE_BASE}/api/v1/phone/attachment/${m.attachment.fileId}`, type: 'application/octet-stream' } : undefined,
+            ts: Date.parse(m.at) || Date.now(), seq: m.seq,
+          }))])
+          // 信令消息（语音 offer/answer/candidate）→ 处理
+          for (const m of d.messages) { if (m.signal) handleSignal(m) }
+        }
+      } catch {}
+    }
+    poll()
+    const t = setInterval(poll, 5000)
+    return () => clearInterval(t)
+  }, [lastSeq])
 
   function onUnlock(name: string): void {
     const th = THEMES[name]
@@ -596,21 +631,33 @@ function PhoneOverlay(): JSX.Element {
     }).catch(() => {})   // 静默失败，不影响主流程
   }
 
+  // ── 语音角色：本端是主叫还是被叫、本端号码 ──
+  const myRole = useRef<'caller' | 'callee' | null>(null)
+  const myNumRef = useRef<string | null>(null)
+  const NUM_A = '+86951230001'
+  const NUM_B = '+86951230002'
+
   // 拨号：解析号码 → 设置通话状态（ringing）→ 对端面板被唤起
   async function onDial(fromId: 'A' | 'B', target: string): Promise<void> {
     reportUsage('calls', 1)
+    myRole.current = 'caller'
+    myNumRef.current = fromId === 'A' ? NUM_A : NUM_B
     try {
       const res = await fetch(`${PHONE_BASE}/api/v1/phone/resolve?number=${encodeURIComponent(target)}`, {
         headers: { Accept: 'application/json' },
       })
       const data = await res.json()
       setCall({ stage: 'ringing', callerId: fromId, calleeId: (fromId === 'A' ? 'B' : 'A'), call: data, connectedAt: Date.now() })
+      // 主叫方立即发起语音建连（发 offer 经中继，被叫方收到即唤起）
+      establishVoice()
     } catch {
       setCall({ stage: 'ringing', callerId: fromId, calleeId: (fromId === 'A' ? 'B' : 'A'), call: { registered: false, reason: '解析失败' }, connectedAt: Date.now() })
     }
   }
 
   function onAnswer(): void {
+    myRole.current = 'callee'
+    myNumRef.current = call?.calleeId === 'A' ? NUM_A : NUM_B
     setCall((c) => (c ? { ...c, stage: 'connected', connectedAt: Date.now() } : c))
     establishVoice()
   }
@@ -624,47 +671,140 @@ function PhoneOverlay(): JSX.Element {
     endVoice()
   }
 
+  // ── 语音：信令经中继（P2P 媒体 + STUN 打洞）──
+  const ICE = { iceServers: [{ urls: 'stun:compliancehub.cn:3478' }] }
+  const [pc, setPc] = useState<RTCPeerConnection | null>(null)
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null)
+  const voiceRef = { pc: pc, local: localStream, muted: false }
+  const signalBuf = useRef<Array<any>>([])   // 待处理信令缓冲
+  const pendingOffer = useRef<any>(null)
+  const candBuf = useRef<Array<any>>([])     // 待加入的 ICE candidate（remoteDescription 就绪前缓冲）
+
+  function flushCandidates(): void {
+    while (candBuf.current.length) {
+      const c = candBuf.current.shift()!
+      voiceRef.pc?.addIceCandidate(c).catch(() => {})
+    }
+  }
+
+  function sendSignal(type: string, data: any): void {
+    const from = myNumRef.current || NUM_A
+    const to = from === NUM_A ? NUM_B : NUM_A
+    fetch(`${PHONE_BASE}/api/v1/phone/message`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: AGENT_DID, fromNumber: from, to, signal: { type, data } }),
+    }).catch(() => {})
+  }
+
+  async function handleSignal(m: any): Promise<void> {
+    const sig = m.signal
+    if (!sig) return
+    // 旧版本/无身份来源的信令（fromNumber 为 '信令'）不再处理
+    if (!m.fromNumber || m.fromNumber === '信令') return
+    // 同页双面板共享组件：发给任一号码的信令都可能是本页的
+    const from = myNumRef.current
+    if (from && m.to !== from && m.to !== (from === NUM_A ? NUM_B : NUM_A)) return
+    // answer/candidate 的自回声丢弃（避免重复处理自己的应答/候选）
+    if (from && m.fromNumber === from && sig.type !== 'offer') return
+    signalBuf.current.push(m)
+    await drainSignals()
+  }
+
+  async function drainSignals(): Promise<void> {
+    while (signalBuf.current.length) {
+      const m = signalBuf.current.shift()!
+      const sig = m.signal
+      try {
+        if (sig.type === 'offer') {
+          const selfEcho = !!myNumRef.current && m.fromNumber === myNumRef.current
+          // 唤起被叫方来电（跨设备：B 的页面收到 offer → 显示来电）
+          pendingOffer.current = sig.data
+          if (selfEcho) continue   // 同页回环：仅记录 pendingOffer，供本页对端面板接听时应答，不重复唤起/不应答
+          const fromNum = m.fromNumber === NUM_A ? 'A' : 'B'
+          const callerId = (fromNum === 'A' ? 'A' : 'B') as 'A' | 'B'
+          const calleeId = (fromNum === 'A' ? 'B' : 'A') as 'A' | 'B'
+          myRole.current = 'callee'
+          myNumRef.current = m.to || NUM_B
+          setCall({ stage: 'ringing', callerId, calleeId, call: { registered: true }, connectedAt: Date.now() })
+          // 若本端已接听（voiceRef.pc 存在）→ 直接应答
+          if (voiceRef.pc) {
+            await voiceRef.pc.setRemoteDescription(sig.data)
+            flushCandidates()
+            const ans = await voiceRef.pc.createAnswer()
+            await voiceRef.pc.setLocalDescription(ans)
+            sendSignal('answer', ans)
+          }
+        } else if (sig.type === 'answer') {
+          await voiceRef.pc?.setRemoteDescription(sig.data)
+          setVoiceState('connected')
+          setCall((c) => (c ? { ...c, stage: 'connected' } : c))
+          flushCandidates()
+        } else if (sig.type === 'candidate') {
+          // candidate 可能先于 remoteDescription 到达 → 缓冲，remote 就绪后再加
+          if (!voiceRef.pc || !voiceRef.pc.remoteDescription) { candBuf.current.push(sig.data) }
+          else await voiceRef.pc.addIceCandidate(sig.data)
+        }
+      } catch (e) { console.error('信令处理失败', e) }
+    }
+  }
+
   async function establishVoice(): Promise<void> {
-    if (voice) return
+    if (voiceRef.pc) {
+      // 同页回环：pc 已存在（本页主叫建的）→ 被叫面板接听时用现有 pc 应答
+      if (myRole.current === 'callee' && pendingOffer.current) {
+        try {
+          await voiceRef.pc.setRemoteDescription(pendingOffer.current)
+          pendingOffer.current = null
+          const ans = await voiceRef.pc.createAnswer()
+          await voiceRef.pc.setLocalDescription(ans)
+          sendSignal('answer', ans)
+        } catch (e) { console.error('回环应答失败', e) }
+      }
+      return
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const pcA = new RTCPeerConnection()
-      const pcB = new RTCPeerConnection()
-      stream.getTracks().forEach((t) => pcA.addTrack(t, stream))
-      pcB.ontrack = (e) => {
+      const p = new RTCPeerConnection(ICE)
+      stream.getTracks().forEach((t) => p.addTrack(t, stream))
+      p.onicecandidate = (e) => { if (e.candidate) sendSignal('candidate', e.candidate) }
+      p.ontrack = (e) => {
         const audio = new Audio()
         audio.srcObject = e.streams[0]
         audio.play().catch(() => {})
       }
-      pcA.onicecandidate = (e) => { if (e.candidate) pcB.addIceCandidate(e.candidate).catch(() => {}) }
-      pcB.onicecandidate = (e) => { if (e.candidate) pcA.addIceCandidate(e.candidate).catch(() => {}) }
-      const offer = await pcA.createOffer()
-      await pcA.setLocalDescription(offer)
-      await pcB.setRemoteDescription(offer)
-      const answer = await pcB.createAnswer()
-      await pcB.setLocalDescription(answer)
-      await pcA.setRemoteDescription(answer)
-      setVoice({ pcA, pcB, stream, muted: false })
-    } catch (e) {
-      console.error('语音建连失败（mic 权限或 WebRTC）：', e)
-    }
+      setPc(p); setLocalStream(stream)
+      voiceRef.pc = p; voiceRef.local = stream
+      if (myRole.current === 'caller') {
+        // 主叫方：发起 offer
+        const offer = await p.createOffer()
+        await p.setLocalDescription(offer)
+        sendSignal('offer', offer)
+      } else if (pendingOffer.current) {
+        // 被叫方：offer 已由中继拉到（pendingOffer）→ 应答
+        await p.setRemoteDescription(pendingOffer.current)
+        pendingOffer.current = null
+        flushCandidates()
+        const ans = await p.createAnswer()
+        await p.setLocalDescription(ans)
+        sendSignal('answer', ans)
+      }
+    } catch (e) { console.error('语音建连失败：', e) }
   }
 
   function endVoice(): void {
-    voice?.pcA.close(); voice?.pcB.close()
-    voice?.stream.getTracks().forEach((t) => t.stop())
-    setVoice(null)
+    pc?.close(); setPc(null); setLocalStream(null)
+    voiceRef.pc = null
+    localStream?.getTracks().forEach((t) => t.stop())
   }
 
   function toggleMute(): void {
-    setVoice((v) => {
-      if (!v) return v
-      v.stream.getAudioTracks().forEach((t) => { t.enabled = v.muted })
-      return { ...v, muted: !v.muted }
-    })
+    voiceRef.muted = !voiceRef.muted
+    localStream?.getAudioTracks().forEach((t) => { t.enabled = !voiceRef.muted })
+    setVoiceState((s) => s)  // 触发重渲染
   }
 
-  const voiceFace = { active: !!voice, muted: voice?.muted ?? false, onToggleMute: toggleMute } as any
+  const [voiceState, setVoiceState] = useState<'idle' | 'calling' | 'connected'>('idle')
+  const voiceFace = { active: voiceState === 'connected' || voiceState === 'calling', muted: voiceRef.muted, onToggleMute: toggleMute } as any
 
   return (
     <>
