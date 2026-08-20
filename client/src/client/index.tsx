@@ -123,8 +123,10 @@ function PhonePanel(props: {
   const [contactsErr, setContactsErr] = useState('')
   const [groupInput, setGroupInput] = useState('')
   const [usage, setUsage] = useState<any>(null)
-  const [account, setAccount] = useState<{ numbers: string[]; applying: boolean; done: string | null; err: string }>({ numbers: [], applying: false, done: null, err: '' })
+  const [account, setAccount] = useState<{ numbers: string[]; applying: boolean; done: string | null; err: string; credits: number; welcome: number }>({ numbers: [], applying: false, done: null, err: '', credits: 0, welcome: 0 })
   const [acctName, setAcctName] = useState('')
+  const [agreed, setAgreed] = useState(false)
+  const [showTerms, setShowTerms] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const sender = props.id === 'A' ? '电话 A（+86 95123 0001）' : '电话 B（+86 95123 0002）'
 
@@ -155,6 +157,10 @@ function PhonePanel(props: {
     fetch(`${PHONE_BASE}/api/v1/phone/lookup?did=${encodeURIComponent(AGENT_DID)}`, { headers: { Accept: 'application/json' } })
       .then((r) => r.json())
       .then((d) => { setAccount((a) => ({ ...a, numbers: d.numbers || [], done: null, err: '' })); setView('account') })
+    fetch(`${PHONE_BASE}/api/v1/phone/credits?did=${encodeURIComponent(AGENT_DID)}`, { headers: { Accept: 'application/json' } })
+      .then((r) => r.json())
+      .then((d) => { setAccount((a) => ({ ...a, credits: d.credits || 0 })) })
+      .catch(() => {})
       .catch(() => {})
   }
   async function applyAccount(): Promise<void> {
@@ -162,11 +168,11 @@ function PhonePanel(props: {
     try {
       const r = await fetch(`${PHONE_BASE}/api/v1/phone/apply`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ agentDid: AGENT_DID, displayName: acctName }),
+        body: JSON.stringify({ agentDid: AGENT_DID, displayName: acctName, consent: true }),
       })
       const d = await r.json()
       if (r.status === 201) {
-        setAccount((a) => ({ ...a, numbers: [...a.numbers, d.number], done: d.number, applying: false }))
+        setAccount((a) => ({ ...a, numbers: [...a.numbers, d.number], done: d.number, welcome: d.welcomeCredits || 0, credits: (a.credits || 0) + (d.welcomeCredits || 0), applying: false }))
       } else {
         setAccount((a) => ({ ...a, err: d.error || '申请失败', applying: false }))
       }
@@ -345,7 +351,11 @@ function PhonePanel(props: {
                   <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 2 }}>📱 电话开户</div>
                   <div style={{ fontSize: 10, color: '#8e8e93', marginBottom: 8 }}>{AGENT_DID}</div>
                   <div style={{ width: '100%', background: '#1c1c1e', borderRadius: 12, padding: 10, marginBottom: 8 }}>
-                    <div style={{ fontSize: 11, color: '#8e8e93', marginBottom: 4 }}>我的号码（最多 2 部）</div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6 }}>
+                    <span style={{ color: '#8e8e93' }}>🪙 积分余额</span>
+                    <span style={{ color: '#fbbf24', fontWeight: 600 }}>{account.credits}</span>
+                  </div>
+                  <div style={{ fontSize: 11, color: '#8e8e93', marginBottom: 4 }}>我的号码（最多 2 部）</div>
                     {account.numbers.length === 0
                       ? <div style={{ fontSize: 12, color: '#48484a' }}>尚未开户</div>
                       : account.numbers.map((n) => (
@@ -360,13 +370,30 @@ function PhonePanel(props: {
                     <div style={{ width: '100%' }}>
                       <input value={acctName} onChange={(e) => setAcctName(e.target.value)} placeholder="显示名（可选）"
                         style={{ width: '100%', boxSizing: 'border-box', background: '#1c1c1e', color: '#fff', border: '1px solid #2c2c2e', borderRadius: 10, padding: '7px 10px', fontSize: 13, marginBottom: 8 }} />
-                      <button onClick={applyAccount} disabled={account.applying}
-                        style={{ width: '100%', height: 38, borderRadius: 999, background: '#34c759', color: '#fff', border: 0, fontSize: 14, cursor: 'pointer' }}>
-                        {account.applying ? '申请中…' : '申请号码（开户）'}
+                      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, fontSize: 11, color: '#8e8e93', marginBottom: 8, cursor: 'pointer' }}>
+                        <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)}
+                          style={{ marginTop: 1, accentColor: '#0a84ff' }} />
+                        <span>我已阅读并同意<button onClick={(e) => { e.preventDefault(); setShowTerms(true) }} style={{ background: 'none', border: 'none', color: '#0a84ff', fontSize: 11, cursor: 'pointer', padding: 0 }}>《服务说明（实验）》</button></span>
+                      </label>
+                      {showTerms && (
+                        <div style={{ marginBottom: 8, padding: 10, borderRadius: 10, background: '#1c1c1e', maxHeight: 120, overflowY: 'auto', fontSize: 10, color: '#94a3b8', lineHeight: 1.7 }}>
+                          <b style={{ color: '#e2e8f0' }}>dsh-phone 服务说明（实验）</b><br />
+                          实验项目：不保证持续可用/无中断/无错误；服务可随时调整或终止。<br />
+                          记录号码、Agent 身份与用量元数据（时长/计数/大小）；不记录通话/短信/附件内容；数据不出售。<br />
+                          禁止骚扰、诈骗、垃圾信息等滥用；违规停用。<br />
+                          认证等级是"信任摘要"，不是"安全保证"；不构成安全/可靠/合法背书；交互风险自行承担。<br />
+                          责任限制：不承担间接/后果性损失；直接损失以实验能力为限。<br />
+                          <button onClick={() => setShowTerms(false)} style={{ background: 'none', border: 'none', color: '#0a84ff', fontSize: 10, cursor: 'pointer', marginTop: 4 }}>关闭</button>
+                        </div>
+                      )}
+                      <button onClick={applyAccount} disabled={account.applying || !agreed}
+                        style={{ width: '100%', height: 38, borderRadius: 999, background: agreed ? '#34c759' : '#2c2c2e', color: agreed ? '#fff' : '#8e8e93', border: 0, fontSize: 14, cursor: agreed ? 'pointer' : 'not-allowed' }}>
+                        {account.applying ? '申请中…' : agreed ? '申请号码（开户）' : '请先勾选同意服务说明'}
                       </button>
                       {account.done && (
                         <div style={{ marginTop: 8, padding: 10, borderRadius: 10, background: 'rgba(52,211,153,.12)', fontSize: 13, textAlign: 'center' }}>
                           🎉 开户成功！<br /><span style={{ fontSize: 16, fontWeight: 600, letterSpacing: 1 }}>{account.done}</span>
+                          {account.welcome > 0 && <div style={{ marginTop: 6, fontSize: 13, color: '#fbbf24' }}>🪙 +{account.welcome} 积分（第一批开户礼）</div>}
                         </div>
                       )}
                       {account.err && <div style={{ marginTop: 8, fontSize: 12, color: '#ff453a', textAlign: 'center' }}>{account.err}</div>}
