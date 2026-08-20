@@ -108,6 +108,7 @@ function PhonePanel(props: {
   onSendSms: (from: 'A' | 'B', text?: string, attachment?: SmsMsg['attachment']) => void
   voice: { active: boolean; muted: boolean; onToggleMute(): void }
   group: { msgs: Array<{ from: string; text: string; ts: number }>; onSend(from: string, text: string): void }
+  onReport(type: string, amount: number): void
   badgeLevel: number
   call: { stage: 'ringing' | 'connected'; callerId: 'A' | 'B'; calleeId: 'A' | 'B'; call?: any; connectedAt: number } | null
   onDial(fromId: 'A' | 'B', target: string): void
@@ -117,10 +118,13 @@ function PhonePanel(props: {
   const [open, setOpen] = useState(false)
   const [local, setLocal] = useState<null | { num: string }>(null)
   const [smsInput, setSmsInput] = useState('')
-  const [view, setView] = useState<'dial' | 'contacts' | 'group'>('dial')
+  const [view, setView] = useState<'dial' | 'contacts' | 'group' | 'usage' | 'account'>('dial')
   const [contacts, setContacts] = useState<Array<{ number: string; agentDid: string; displayName: string | null; level: number }> | null>(null)
   const [contactsErr, setContactsErr] = useState('')
   const [groupInput, setGroupInput] = useState('')
+  const [usage, setUsage] = useState<any>(null)
+  const [account, setAccount] = useState<{ numbers: string[]; applying: boolean; done: string | null; err: string }>({ numbers: [], applying: false, done: null, err: '' })
+  const [acctName, setAcctName] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
   const sender = props.id === 'A' ? '电话 A（+86 95123 0001）' : '电话 B（+86 95123 0002）'
 
@@ -135,6 +139,7 @@ function PhonePanel(props: {
     if (!text) return
     props.group.onSend(sender, text)
     setGroupInput('')
+    props.onReport('group_msgs', 1)
   }
 
   function loadContacts(): void {
@@ -143,6 +148,36 @@ function PhonePanel(props: {
       .then((r) => r.json())
       .then((d) => { setContacts(d.numbers || []); setView('contacts') })
       .catch(() => setContactsErr('通讯录加载失败'))
+  }
+
+  const AGENT_DID = 'did:cha2a:agent:dshlib'
+  function loadAccount(): void {
+    fetch(`${PHONE_BASE}/api/v1/phone/lookup?did=${encodeURIComponent(AGENT_DID)}`, { headers: { Accept: 'application/json' } })
+      .then((r) => r.json())
+      .then((d) => { setAccount((a) => ({ ...a, numbers: d.numbers || [], done: null, err: '' })); setView('account') })
+      .catch(() => {})
+  }
+  async function applyAccount(): Promise<void> {
+    setAccount((a) => ({ ...a, applying: true, err: '' }))
+    try {
+      const r = await fetch(`${PHONE_BASE}/api/v1/phone/apply`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentDid: AGENT_DID, displayName: acctName }),
+      })
+      const d = await r.json()
+      if (r.status === 201) {
+        setAccount((a) => ({ ...a, numbers: [...a.numbers, d.number], done: d.number, applying: false }))
+      } else {
+        setAccount((a) => ({ ...a, err: d.error || '申请失败', applying: false }))
+      }
+    } catch { setAccount((a) => ({ ...a, err: '网络错误', applying: false })) }
+  }
+
+  function loadUsage(): void {
+    fetch(`${PHONE_BASE}/api/v1/phone/usage?did=${encodeURIComponent('did:cha2a:agent:dshlib')}`, { headers: { Accept: 'application/json' } })
+      .then((r) => r.json())
+      .then((d) => { setUsage(d.usage); setView('usage') })
+      .catch(() => {})
   }
 
   const target = local?.num ?? '+86'
@@ -160,6 +195,7 @@ function PhonePanel(props: {
     if (!text) return
     props.onSendSms(props.id, text)
     setSmsInput('')
+    props.onReport('sms_sent', 1)
   }
 
   async function sendAttachment(file: File): Promise<void> {
@@ -170,6 +206,7 @@ function PhonePanel(props: {
       name: file.name, size: file.size, type: file.type || 'application/octet-stream',
       url: URL.createObjectURL(file), hash,
     })
+    props.onReport('attachment_bytes', file.size)
   }
 
   const ringTone = { idle: '#64748b', ok: '#34d399', warn: '#fbbf24', bad: '#f87171', ring: '#22d3ee' }
@@ -222,6 +259,8 @@ function PhonePanel(props: {
                 <div style={{ display: 'flex', gap: 10 }}>
                   <button onClick={() => setView('group')} style={{ background: 'none', border: 'none', color: '#0a84ff', fontSize: 12, cursor: 'pointer' }}>💬</button>
                   <button onClick={loadContacts} style={{ background: 'none', border: 'none', color: '#0a84ff', fontSize: 12, cursor: 'pointer' }}>👥</button>
+                  <button onClick={loadUsage} style={{ background: 'none', border: 'none', color: '#0a84ff', fontSize: 12, cursor: 'pointer' }}>📊</button>
+                  <button onClick={loadAccount} style={{ background: 'none', border: 'none', color: '#0a84ff', fontSize: 12, cursor: 'pointer' }}>📱</button>
                 </div>
               </div>
 
@@ -276,6 +315,64 @@ function PhonePanel(props: {
                     </button>
                   ))}
                   <button onClick={() => setView('dial')} style={{ background: 'none', border: 'none', color: '#0a84ff', fontSize: 12, cursor: 'pointer', marginTop: 4 }}>← 返回拨号</button>
+                </div>
+              )}
+
+              {view === 'usage' && (
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: 10 }}>
+                  <div style={{ fontSize: 11, color: '#8e8e93' }}>📊 电话用量（dshlib Agent Line）</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, width: '100%' }}>
+                    {[
+                      ['📞 通话', usage ? ((usage.callSeconds / 60).toFixed(1)) + ' 分' : '—'],
+                      ['💬 短信', usage ? usage.smsSent + ' 发 / ' + usage.smsReceived + ' 收' : '—'],
+                      ['📎 附件', usage ? (usage.attachmentBytes / 1048576).toFixed(2) + ' MB' : '—'],
+                      ['👥 群聊', usage ? usage.groupMsgs + ' 条' : '—'],
+                      ['📞 呼叫', usage ? usage.calls + ' 次' : '—'],
+                      ['🕒 更新', usage ? (usage.updatedAt || '').slice(11, 19) : '—'],
+                    ].map(([k, v], i) => (
+                      <div key={i} style={{ background: '#1c1c1e', borderRadius: 12, padding: '10px 12px' }}>
+                        <div style={{ fontSize: 11, color: '#8e8e93' }}>{k}</div>
+                        <div style={{ fontSize: 18, fontWeight: 600, marginTop: 2 }}>{v}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <button onClick={() => setView('dial')} style={{ background: 'none', border: 'none', color: '#0a84ff', fontSize: 12, cursor: 'pointer', marginTop: 4 }}>← 返回拨号</button>
+                </div>
+              )}
+
+              {view === 'account' && (
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 4px' }}>
+                  <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 2 }}>📱 电话开户</div>
+                  <div style={{ fontSize: 10, color: '#8e8e93', marginBottom: 8 }}>{AGENT_DID}</div>
+                  <div style={{ width: '100%', background: '#1c1c1e', borderRadius: 12, padding: 10, marginBottom: 8 }}>
+                    <div style={{ fontSize: 11, color: '#8e8e93', marginBottom: 4 }}>我的号码（最多 2 部）</div>
+                    {account.numbers.length === 0
+                      ? <div style={{ fontSize: 12, color: '#48484a' }}>尚未开户</div>
+                      : account.numbers.map((n) => (
+                        <div key={n} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, padding: '4px 0' }}>
+                          <span style={{ letterSpacing: 1 }}>{n}</span>
+                          <img src={`${PHONE_BASE}/store/assets/l3.png`} alt="L3" style={{ height: 14 }} />
+                        </div>
+                      ))}
+                    <div style={{ fontSize: 10, color: '#48484a', marginTop: 4 }}>{account.numbers.length}/2</div>
+                  </div>
+                  {account.numbers.length < 2 && (
+                    <div style={{ width: '100%' }}>
+                      <input value={acctName} onChange={(e) => setAcctName(e.target.value)} placeholder="显示名（可选）"
+                        style={{ width: '100%', boxSizing: 'border-box', background: '#1c1c1e', color: '#fff', border: '1px solid #2c2c2e', borderRadius: 10, padding: '7px 10px', fontSize: 13, marginBottom: 8 }} />
+                      <button onClick={applyAccount} disabled={account.applying}
+                        style={{ width: '100%', height: 38, borderRadius: 999, background: '#34c759', color: '#fff', border: 0, fontSize: 14, cursor: 'pointer' }}>
+                        {account.applying ? '申请中…' : '申请号码（开户）'}
+                      </button>
+                      {account.done && (
+                        <div style={{ marginTop: 8, padding: 10, borderRadius: 10, background: 'rgba(52,211,153,.12)', fontSize: 13, textAlign: 'center' }}>
+                          🎉 开户成功！<br /><span style={{ fontSize: 16, fontWeight: 600, letterSpacing: 1 }}>{account.done}</span>
+                        </div>
+                      )}
+                      {account.err && <div style={{ marginTop: 8, fontSize: 12, color: '#ff453a', textAlign: 'center' }}>{account.err}</div>}
+                    </div>
+                  )}
+                  <button onClick={() => setView('dial')} style={{ background: 'none', border: 'none', color: '#0a84ff', fontSize: 12, cursor: 'pointer', marginTop: 8 }}>← 返回拨号</button>
                 </div>
               )}
 
@@ -384,8 +481,17 @@ function PhoneOverlay(): JSX.Element {
     setGroupMsgs((l) => [...l, { from, text, ts: Date.now() }])
   }
 
+  const AGENT_DID = 'did:cha2a:agent:dshlib'
+  function reportUsage(type: string, amount: number): void {
+    fetch(`${PHONE_BASE}/api/v1/phone/usage`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ did: AGENT_DID, type, amount }),
+    }).catch(() => {})   // 静默失败，不影响主流程
+  }
+
   // 拨号：解析号码 → 设置通话状态（ringing）→ 对端面板被唤起
   async function onDial(fromId: 'A' | 'B', target: string): Promise<void> {
+    reportUsage('calls', 1)
     try {
       const res = await fetch(`${PHONE_BASE}/api/v1/phone/resolve?number=${encodeURIComponent(target)}`, {
         headers: { Accept: 'application/json' },
@@ -403,6 +509,10 @@ function PhoneOverlay(): JSX.Element {
   }
 
   function onHangup(): void {
+    if (call) {
+      const secs = Math.max(1, Math.round((Date.now() - call.connectedAt) / 1000))
+      reportUsage('call_seconds', secs)
+    }
     setCall(null)
     endVoice()
   }
@@ -453,10 +563,10 @@ function PhoneOverlay(): JSX.Element {
     <>
       <PhonePanel id="A" label="dshlib · 电话 A" ownNumber="+86 95123 0001" otherNumber="+86 95123 0002"
         badgeLevel={3} smsList={smsLog} onSendSms={sendSms} voice={voiceFace}
-        group={{ msgs: groupMsgs, onSend: sendGroup }} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} />
+        group={{ msgs: groupMsgs, onSend: sendGroup }} onReport={reportUsage} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} />
       <PhonePanel id="B" label="dshlib · 电话 B" ownNumber="+86 95123 0002" otherNumber="+86 95123 0001"
         badgeLevel={3} smsList={smsLog} onSendSms={sendSms} voice={voiceFace}
-        group={{ msgs: groupMsgs, onSend: sendGroup }} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} />
+        group={{ msgs: groupMsgs, onSend: sendGroup }} onReport={reportUsage} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} />
     </>
   )
 }
