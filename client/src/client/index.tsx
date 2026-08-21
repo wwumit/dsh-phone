@@ -7,11 +7,22 @@
  *
  * 共享状态：dshPhone 服务（ctx.provide）持有浮窗 open/number 的 snapshot store，
  * overlay 组件（useSyncExternalStore 订阅）与命令（onSelect 写）联动。
+ *
+ * 架构：client 半 = 平台层（apply/装配/共享状态/语音/API）+ App 层（apps/ 目录，
+ * 开放注册表）。App 只依赖 AppProps 契约，不依赖平台实现——第三方可 registerApp 扩展。
  */
 import React, { useRef, useState, useSyncExternalStore } from 'react'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
+import { PHONE_BASE, AGENT_DID, MINE_NUM, PEER_NUM, NUM_A, NUM_B, THEME_KEY, UNLOCKED_KEY } from './config'
+import { THEMES, SF, type Theme } from './theme'
+import { api, ApiError } from './api'
+import { registerApp, getApp, type AppData, type AppActions, type AppProps } from './apps'
+import { registerBuiltinApps } from './apps/index'
+import { HomeApp } from './apps/home'
+
+registerBuiltinApps()
 
 export const name = 'dsh-phone'
 export const inject = ['slots', 'sessions', 'commandUi']
@@ -39,10 +50,52 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-const PHONE_BASE = 'https://compliancehub.cn'
-const CALLER_NUM = '+86 95123 0001' // 主叫 = 电话 A
+let clientCtx: any = null                      // apply 注入的 ctx（供组件访问 sessions）
 
 export function apply(ctx: ClientContext): void {
+  clientCtx = ctx
+  // ── agent 会话登记（session-bind：凭证驱动——先拿 token 再绑定；号码→agentDID→locate→sessionId）──
+  const BIND_INTERVAL = 30 * 60 * 1000   // 心跳：TTL 3600s 的一半
+  // 凭证缓存（避免每次心跳都重签）：{ token, expiresAt }
+  let cachedToken: { token: string; expiresAt: number } | null = null
+
+  async function getSessionToken(): Promise<string | null> {
+    // 缓存有效直接复用；否则签发新凭证
+    if (cachedToken && cachedToken.expiresAt > Date.now() + 60 * 1000) return cachedToken.token
+    try {
+      const r = await api.sessionToken('dsh-phone', 3600)
+      if (r && r.ok && r.token) {
+        cachedToken = { token: r.token, expiresAt: Date.parse(r.expiresAt) }
+        return r.token
+      }
+      return null
+    } catch { return null }
+  }
+
+  async function registerSession(sessionId: string): Promise<void> {
+    const token = await getSessionToken()
+    // 凭证签发失败（白名单外/速率）→ 回退 tokenless（过渡，仍可登记）
+    api.sessionBind({ agentDid: AGENT_DID, sessionId, ttlSeconds: 3600, registeredBy: 'dsh-phone', ...(token ? { token } : {}) }).catch(() => {})
+  }
+  function tryBindSessions(): void {
+    try {
+      const snap = (clientCtx as any)?.sessions?.list?.getSnapshot?.()
+      const rows = snap ? Object.values(snap.byId || {}) : []
+      // 选一个标准 agent 会话登记（优先 title 非空、非搜索类的）
+      const target = rows.find((r: any) => (r as any).agentPreset === 'standard' && (r as any).title) || rows[0]
+      if (target) {
+        const sid = (target as any).id
+        console.log('[dsh-phone] session-bind 登记:', sid)
+        registerSession(sid)
+      }
+    } catch (e) { console.error('[dsh-phone] session-bind 失败:', String(e).slice(0, 100)) }
+  }
+
+  setTimeout(tryBindSessions, 3000)          // 等会话加载
+  setTimeout(tryBindSessions, 10000)         // 再试一次（会话可能晚出现）
+  const bindTimer = setInterval(tryBindSessions, BIND_INTERVAL)  // 心跳续期
+  ctx.on('dispose', () => clearInterval(bindTimer))
+
   // 1. dshPhone 服务：浮窗开关 + 拨号
   ctx.provide('dshPhone', {
     toggle: () => store.set({ ...store.getSnapshot(), open: !store.getSnapshot().open }),
@@ -90,27 +143,6 @@ export function apply(ctx: ClientContext): void {
   })
 }
 
-// ── 主题系统（皮肤：颜色 + 形状 + 键盘 + 字体）──────────────────
-interface Theme {
-  name: string; label: string; unlock?: number
-  shell: string; screen: string; key: string; card: string; border: string
-  accent: string; ok: string; bad: string; warn: string
-  sub: string; muted: string; text: string; msgMine: string; msgOther: string
-  shape: 'round' | 'squared' | 'retro'
-  keys: 'circle' | 'square' | 'retro'
-  font: string
-}
-const THEMES: Record<string, Theme> = {
-  classic: { name: 'classic', label: '经典深色', shell: '#000', screen: '#000', key: '#1c1c1e', card: '#1c1c1e', border: '#2c2c2e', accent: '#0a84ff', ok: '#34c759', bad: '#ff3b30', warn: '#fbbf24', sub: '#8e8e93', muted: '#48484a', text: '#fff', msgMine: '#0b84ff', msgOther: '#26262a', shape: 'round', keys: 'circle', font: '-apple-system, "SF Pro", sans-serif' },
-  nebula: { name: 'nebula', label: '星空蓝', shell: '#070a24', screen: '#0a0e2e', key: '#161b3f', card: '#161b3f', border: '#2a3160', accent: '#7c6cf6', ok: '#30d158', bad: '#ff453a', warn: '#ffd60a', sub: '#9a9ac8', muted: '#55558a', text: '#eef0ff', msgMine: '#5e5ce6', msgOther: '#23285c', shape: 'round', keys: 'circle', font: '-apple-system, "SF Pro", sans-serif' },
-  sunset: { name: 'sunset', label: '活力橙', shell: '#1a0d04', screen: '#241206', key: '#33200f', card: '#33200f', border: '#4a2f16', accent: '#ff9f0a', ok: '#ffd60a', bad: '#ff453a', warn: '#ff9f0a', sub: '#b08a5e', muted: '#6e5636', text: '#fff3e6', msgMine: '#ff9500', msgOther: '#3a2a14', shape: 'squared', keys: 'square', font: '-apple-system, "SF Pro", sans-serif' },
-  mint: { name: 'mint', label: '薄荷绿', shell: '#03130d', screen: '#051b12', key: '#0e2e20', card: '#0e2e20', border: '#1c4a35', accent: '#30d158', ok: '#30d158', bad: '#ff453a', warn: '#ffd60a', sub: '#7fb8a0', muted: '#3f6e5c', text: '#eafff4', msgMine: '#248a3d', msgOther: '#13352a', shape: 'round', keys: 'circle', font: '-apple-system, "SF Pro", sans-serif' },
-  graphite: { name: 'graphite', label: '深空黑', shell: '#000', screen: '#050505', key: '#141414', card: '#141414', border: '#262626', accent: '#8e8e93', ok: '#30d158', bad: '#ff453a', warn: '#ffd60a', sub: '#6e6e73', muted: '#3a3a3c', text: '#f5f5f7', msgMine: '#48484a', msgOther: '#1c1c1e', shape: 'squared', keys: 'square', font: '-apple-system, "SF Pro", sans-serif' },
-  retro: { name: 'retro', label: '复古电话', shell: '#f4e9d8', screen: '#f9f3e7', key: '#d8c49a', card: '#efe4d0', border: '#b3a07c', accent: '#b45309', ok: '#16a34a', bad: '#dc2626', warn: '#d97706', sub: '#6b5433', muted: '#8a7355', text: '#241a0d', msgMine: '#b45309', msgOther: '#e0d2ba', shape: 'retro', keys: 'retro', font: '"Courier New", monospace' },
-}
-const THEME_KEY = 'dsh-phone-theme'
-const UNLOCKED_KEY = 'dsh-phone-unlocked'
-
 // ── 电话面板（单部电话完整画面：拨号盘 + 来电/通话 + 独立短信窗）────
 
 interface SmsMsg {
@@ -129,7 +161,16 @@ function PhonePanel(props: {
   smsList: SmsMsg[]
   onSendSms: (from: 'A' | 'B', text?: string, attachment?: SmsMsg['attachment']) => void
   voice: { active: boolean; muted: boolean; onToggleMute(): void }
-  group: { msgs: Array<{ from: string; text: string; ts: number }>; onSend(from: string, text: string): void }
+  group: {
+    list: Array<{ groupId: string; name: string; memberCount: number }>
+    current: { groupId: string; name: string; members: string[] } | null
+    msgs: Array<{ fromNumber: string; text: string; ts: number }>
+    onLoadList(): void
+    onCreate(name: string, members: string[]): Promise<string | null>
+    onOpen(groupId: string): void
+    onSend(from: 'A' | 'B', text: string): Promise<{ delivered: string[]; failed: string[] }> | void
+    onBack(): void
+  }
   onReport(type: string, amount: number): void
   theme: Theme
   unlocked: string[]
@@ -149,18 +190,21 @@ function PhonePanel(props: {
   const t = props.theme
   const [open, setOpen] = useState(false)
   const [local, setLocal] = useState<null | { num: string }>(null)
-  const [smsInput, setSmsInput] = useState('')
-  const [view, setView] = useState<'dial' | 'contacts' | 'group' | 'usage' | 'account' | 'theme'>('dial')
+  type View = 'home' | 'dial' | 'sms' | 'contacts' | 'group' | 'group-chat' | 'usage' | 'account' | 'theme' | 'note' | 'store' | 'settings' | 'about'
+  const [viewStack, setViewStack] = useState<View[]>(['home'])
+  const view = viewStack[viewStack.length - 1]
+  // 导航：push 进栈（同视图不重复）；返回：pop（留 home）
+  function nav(v: View): void {
+    if (v === view) return
+    setViewStack((s) => (v === 'home' ? ['home'] : [...s.filter((x) => x !== 'home'), v]))
+  }
+  function back(): void {
+    setViewStack((s) => (s.length > 1 ? s.slice(0, -1) : ['home']))
+  }
   const [contacts, setContacts] = useState<Array<{ number: string; agentDid: string; displayName: string | null; level: number }> | null>(null)
   const [contactsErr, setContactsErr] = useState('')
-  const [groupInput, setGroupInput] = useState('')
   const [usage, setUsage] = useState<any>(null)
   const [account, setAccount] = useState<{ numbers: string[]; applying: boolean; done: string | null; err: string; credits: number; welcome: number }>({ numbers: [], applying: false, done: null, err: '', credits: 0, welcome: 0 })
-  const [acctName, setAcctName] = useState('')
-  const [agreed, setAgreed] = useState(false)
-  const [showTerms, setShowTerms] = useState(false)
-  const fileRef = useRef<HTMLInputElement>(null)
-  const sender = props.id === 'A' ? '电话 A（+86 95123 0001）' : '电话 B（+86 95123 0002）'
 
   // 来电强制唤起本面板
   const incoming = props.call && props.call.calleeId === props.id
@@ -168,39 +212,32 @@ function PhonePanel(props: {
   const isConnected = props.call && props.call.stage === 'connected'
   const effectiveOpen = open || !!incoming
 
-  function sendGroup(): void {
-    const text = groupInput.trim()
-    if (!text) return
-    props.group.onSend(sender, text)
-    setGroupInput('')
-    props.onReport('group_msgs', 1)
-  }
-
+  // 以下 load 函数只负责拉数据，导航由调用方（App onOpen / 设置页）负责
   function loadContacts(): void {
-    if (contacts) { setView('contacts'); return }
-    fetch(`${PHONE_BASE}/api/v1/phone/directory`, { headers: { Accept: 'application/json' } })
-      .then((r) => r.json())
-      .then((d) => { setContacts(d.numbers || []); setView('contacts') })
-      .catch(() => setContactsErr('通讯录加载失败'))
+    if (!contacts) {
+      fetch(`${PHONE_BASE}/api/v1/phone/directory`, { headers: { Accept: 'application/json' } })
+        .then((r) => r.json())
+        .then((d) => setContacts(d.numbers || []))
+        .catch(() => setContactsErr('通讯录加载失败'))
+    }
   }
 
-  const AGENT_DID = 'did:cha2a:agent:dshlib'
   function loadAccount(): void {
     fetch(`${PHONE_BASE}/api/v1/phone/lookup?did=${encodeURIComponent(AGENT_DID)}`, { headers: { Accept: 'application/json' } })
       .then((r) => r.json())
-      .then((d) => { setAccount((a) => ({ ...a, numbers: d.numbers || [], done: null, err: '' })); setView('account') })
+      .then((d) => { setAccount((a) => ({ ...a, numbers: d.numbers || [], done: null, err: '' })) })
+      .catch(() => {})
     fetch(`${PHONE_BASE}/api/v1/phone/credits?did=${encodeURIComponent(AGENT_DID)}`, { headers: { Accept: 'application/json' } })
       .then((r) => r.json())
       .then((d) => { setAccount((a) => ({ ...a, credits: d.credits || 0 })) })
       .catch(() => {})
-      .catch(() => {})
   }
-  async function applyAccount(): Promise<void> {
+  async function applyAccount(displayName = ''): Promise<void> {
     setAccount((a) => ({ ...a, applying: true, err: '' }))
     try {
       const r = await fetch(`${PHONE_BASE}/api/v1/phone/apply`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ agentDid: AGENT_DID, displayName: acctName, consent: true }),
+        body: JSON.stringify({ agentDid: AGENT_DID, displayName, consent: true }),
       })
       const d = await r.json()
       if (r.status === 201) {
@@ -214,39 +251,13 @@ function PhonePanel(props: {
   function loadUsage(): void {
     fetch(`${PHONE_BASE}/api/v1/phone/usage?did=${encodeURIComponent('did:cha2a:agent:dshlib')}`, { headers: { Accept: 'application/json' } })
       .then((r) => r.json())
-      .then((d) => { setUsage(d.usage); setView('usage') })
+      .then((d) => setUsage(d.usage))
       .catch(() => {})
   }
 
   const target = local?.num ?? '+86'
-  const isMine = (m: SmsMsg) => m.fromNumber === props.ownNumber
-  const mySms = props.smsList.filter(isMine)
-  const peerSms = props.smsList.filter((m) => !isMine(m))
 
-  function dial(): void {
-    if (target === '+86') return
-    props.onDial(props.id, target)   // 交给共享层：解析 + 唤起对端
-  }
   function hangup(): void { setOpen(false); setLocal(null); props.onHangup() }
-
-  function sendSms(): void {
-    const text = smsInput.trim()
-    if (!text) return
-    props.onSendSms(props.id, text)
-    setSmsInput('')
-    props.onReport('sms_sent', 1)
-  }
-
-  async function sendAttachment(file: File): Promise<void> {
-    const buf = await file.arrayBuffer()
-    const digest = await crypto.subtle.digest('SHA-256', buf)
-    const hash = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 16)
-    props.onSendSms(props.id, undefined, {
-      name: file.name, size: file.size, type: file.type || 'application/octet-stream',
-      url: URL.createObjectURL(file), hash,
-    })
-    props.onReport('attachment_bytes', file.size)
-  }
 
   const ringTone = { idle: '#64748b', ok: '#34d399', warn: t.warn, bad: '#f87171', ring: t.accent }
   const tone: 'idle' | 'ok' | 'warn' | 'bad' | 'ring' =
@@ -254,31 +265,63 @@ function PhonePanel(props: {
 
   const shellRadius = t.shape === 'squared' ? 24 : t.shape === 'retro' ? 36 : 42
   const screenRadius = t.shape === 'squared' ? 18 : t.shape === 'retro' ? 28 : 34
-  const keyRadius = t.keys === 'circle' ? '50%' : t.keys === 'square' ? 12 : 6
+  // 浮窗跟随图标位置（不限制边界，支持把整个浮窗拖到浏览器可视范围之外/跨屏）
   const shellStyle: React.CSSProperties = {
-    position: 'fixed', left: props.pos.x - 150, top: props.pos.y - 690, width: 300,
+    position: 'fixed', left: props.pos.x - 165, top: props.pos.y - 760, width: 330,
     background: t.shell, borderRadius: shellRadius, border: `2px solid ${props.top ? t.accent : t.border}`,
     boxShadow: '0 20px 60px rgba(0,0,0,.6)', padding: '8px 8px 12px', zIndex: props.top ? 1100 : 1000, fontFamily: t.font,
   }
   const screenStyle: React.CSSProperties = {
     background: t.screen, borderRadius: screenRadius, overflow: 'hidden', color: t.text,
-    display: 'flex', flexDirection: 'column', height: 588,
-  }
-  const keyStyle: React.CSSProperties = {
-    height: t.keys === 'retro' ? 52 : 46, borderRadius: keyRadius, background: t.key, color: t.text, border: t.keys === 'retro' ? '2px solid ' + t.border : 0, fontSize: t.keys === 'retro' ? 22 : 20, cursor: 'pointer',
-    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', lineHeight: 1,
+    display: 'flex', flexDirection: 'column', height: 660,
   }
   const roundBtn = (bg: string, w = 56): React.CSSProperties => ({
     width: w, height: w, borderRadius: '50%', background: bg, color: '#fff', border: 0, fontSize: 11, cursor: 'pointer',
     display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2,
   })
 
+  // ── App 装配：把本面板的 state/动作打包成 AppProps（App 只依赖此契约）──
+  const appData: AppData = {
+    ownNumber: props.ownNumber,
+    otherNumber: props.otherNumber,
+    badgeLevel: props.badgeLevel,
+    dialTarget: target,
+    smsList: props.smsList,
+    group: props.group,
+    contacts, contactsErr,
+    account, usage,
+    theme: t, unlocked: props.unlocked,
+    call: props.call,
+  }
+  const appActions: AppActions = {
+    nav, back,
+    sendSms: (from, text, attachment) => props.onSendSms(from, text, attachment),
+    sendGroup: (from, text) => props.group.onSend(from, text),
+    loadContacts, loadAccount, loadUsage,
+    loadGroupList: () => props.group.onLoadList(),
+    openGroup: (gid) => props.group.onOpen(gid),
+    createGroup: (name, members) => props.group.onCreate(name, members),
+    groupBack: () => props.group.onBack(),
+    applyAccount,
+    dial: (fromId, num) => props.onDial(fromId, num),
+    answer: () => props.onAnswer(),
+    hangup,
+    toggleMute: () => props.voice.onToggleMute(),
+    reportUsage: (type, amount) => props.onReport(type, amount),
+    unlock: (name) => props.onUnlock(name),
+    selectTheme: (name) => props.onSelectTheme(name),
+    setLocalNum: (num) => setLocal({ num }),
+  }
+  const appProps: AppProps = { id: props.id, data: appData, actions: appActions, t, nav, back }
+  const CurrentApp = view === 'home' ? null : getApp(view)
+
   return (
     <>
       <button
         onClick={() => { if (!props.justDragged) { props.onFocus(); setOpen(!open) } }}
         onPointerDown={props.onDragStart}
-        style={{ position: 'fixed', left: props.pos.x - 26, top: props.pos.y - 26, width: 52, height: 52, borderRadius: '50%',
+        style={{ position: 'fixed', left: props.pos.x - 26, top: props.pos.y - 26,
+          width: 52, height: 52, borderRadius: '50%',
           background: t.key, color: t.accent, border: incoming ? '2px solid #22d3ee' : '1px solid #3a3a3c',
           fontSize: 20, cursor: 'grab', zIndex: 999, boxShadow: '0 4px 14px rgba(0,0,0,.4)', touchAction: 'none' }}
         aria-label={`dsh-phone ${props.id}`} title={`${props.label} · ${props.ownNumber}`}
@@ -289,262 +332,44 @@ function PhonePanel(props: {
 
       {effectiveOpen && (
         <div style={shellStyle} onClick={() => props.onFocus()}>
-          <div style={{ width: 84, height: 20, background: '#000', borderRadius: 12, margin: '2px auto 6px', border: '1px solid #1c1c1e' }} />
+          {view === 'home' && <div style={{ width: 84, height: 20, background: '#000', borderRadius: 12, margin: '2px auto 6px', border: '1px solid #1c1c1e' }} />}
           <div style={screenStyle}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 18px 0', fontSize: 11, color: '#fff' }}>
-              <span>{new Date().toTimeString().slice(0, 5)}</span>
-              <span>📶 🔋</span>
+            {view === 'home' && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 14px 0', fontSize: 11, color: '#fff' }}>
+                <button onClick={() => setOpen(false)} title="最小化（关闭浮窗）" aria-label="最小化"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#fff', fontSize: 14, padding: '0 4px', lineHeight: 1, opacity: 0.85 }}>
+                  ▁
+                </button>
+                <span>{new Date().toTimeString().slice(0, 5)}</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, opacity: 0.9 }}>
+                  {/* WiFi 信号：三弧 + 圆点（标准 iOS 观感） */}
+                  <svg width={14} height={11} viewBox="0 0 24 19" fill="none" stroke="#fff" strokeWidth={2.1} strokeLinecap="round">
+                    <path d="M2.5 7a14.5 14.5 0 0 1 19 0" />
+                    <path d="M6 10.5a9.5 9.5 0 0 1 12 0" />
+                    <path d="M9.5 14a4.5 4.5 0 0 1 5 0" />
+                    <circle cx="12" cy="16.8" r="1.5" fill="#fff" stroke="none" />
+                  </svg>
+                  {/* 电池：横放 + 正极凸起 + 电量 75% */}
+                  <svg width={21} height={10} viewBox="0 0 24 12" fill="none">
+                    <rect x="1" y="1" width="19.5" height="10" rx="3" stroke="#fff" strokeWidth={1.5} />
+                    <rect x="21.5" y="4" width="2" height="4" rx="1" fill="#fff" />
+                    <rect x="3" y="3" width="14" height="6" rx="1.6" fill="#fff" />
+                  </svg>
+                </span>
+              </div>
+            )}
+
+            <div style={{ flex: 1, padding: view === 'home' ? '4px 14px 10px' : '8px 0 10px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+              {view === 'home' ? (
+                <HomeApp {...appProps} />
+              ) : CurrentApp ? (
+                <CurrentApp.component {...appProps} />
+              ) : (
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.muted, fontSize: 12 }}>未知 App：{view}</div>
+              )}
             </div>
 
-            <div style={{ flex: 1, padding: '4px 14px 10px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
-                <div style={{ fontSize: 12, color: t.sub }}>{props.label}{incoming ? ' · 来电' : ''}</div>
-                <div style={{ display: 'flex', gap: 10 }}>
-                  <button onClick={() => setView('group')} style={{ background: 'none', border: 'none', color: t.accent, fontSize: 12, cursor: 'pointer' }}>💬</button>
-                  <button onClick={loadContacts} style={{ background: 'none', border: 'none', color: t.accent, fontSize: 12, cursor: 'pointer' }}>👥</button>
-                  <button onClick={loadUsage} style={{ background: 'none', border: 'none', color: t.accent, fontSize: 12, cursor: 'pointer' }}>📊</button>
-                  <button onClick={loadAccount} style={{ background: 'none', border: 'none', color: t.accent, fontSize: 12, cursor: 'pointer' }}>📱</button>
-                  <button onClick={() => setView('theme')} style={{ background: 'none', border: 'none', color: t.accent, fontSize: 12, cursor: 'pointer' }}>🎨</button>
-                </div>
-              </div>
-
-              {view !== 'contacts' && view !== 'group' && (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, margin: '6px 0 10px' }}>
-                  <div style={{ fontSize: 20, letterSpacing: 1, color: '#fff' }}>{props.ownNumber}</div>
-                  <img src={`${PHONE_BASE}/store/assets/l${props.badgeLevel}.png`} alt={`L${props.badgeLevel}`} style={{ height: 26 }} />
-                </div>
-              )}
-
-              {incoming && (
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(180deg,#1c1c1e,#000)', borderRadius: 24, margin: '4px 0 8px', padding: 16 }}>
-                  <div style={{ fontSize: 26, fontWeight: 600, color: '#fff' }}>📞 {props.id === 'A' ? '电话 B' : '电话 A'}</div>
-                  <div style={{ fontSize: 15, color: t.sub, margin: '4px 0 10px' }}>{props.id === 'A' ? '+86 95123 0002' : '+86 95123 0001'}</div>
-                  {props.call && props.call.call && props.call.call.registered && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: t.sub, marginBottom: 14 }}>
-                      <img src={`${PHONE_BASE}/store/assets/l${props.call.call.trust?.level ?? 0}.png`} alt="badge" style={{ height: 18 }} />
-                      <span>{props.call.call.agentDid}{props.call.call.trust?.revoked ? ' · 已撤销' : ''}</span>
-                    </div>
-                  )}
-                  <div style={{ display: 'flex', gap: 40, marginTop: 10 }}>
-                    <button onClick={props.onAnswer} style={roundBtn(t.ok, 64)}>📞<span>接听</span></button>
-                    <button onClick={hangup} style={roundBtn(t.bad, 64)}>✕<span>拒接</span></button>
-                  </div>
-                </div>
-              )}
-
-              {isConnected && (
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(180deg,#000,#1c1c1e)', borderRadius: 24, margin: '4px 0 8px', padding: 16 }}>
-                  <div style={{ fontSize: 24, fontWeight: 600 }}>{props.id === 'A' ? '电话 B' : '电话 A'}</div>
-                  <div style={{ fontSize: 14, color: t.sub, margin: '4px 0 6px' }}>{props.id === 'A' ? '+86 95123 0002' : '+86 95123 0001'}</div>
-                  <div style={{ fontSize: 30, fontWeight: 300, margin: '8px 0 18px' }}>{((Date.now() - props.call.connectedAt) / 1000) | 0}<span style={{ fontSize: 16 }}>s</span></div>
-                  <div style={{ display: 'flex', gap: 26 }}>
-                    <button onClick={() => props.voice.onToggleMute()} style={roundBtn(t.key, 58)}>{props.voice.muted ? '🔇' : '🔊'}<span style={{ fontSize: 9 }}>{props.voice.muted ? '已静音' : '语音'}</span></button>
-                    <button onClick={hangup} style={roundBtn(t.bad, 66)}>📵<span>挂断</span></button>
-                  </div>
-                </div>
-              )}
-
-              {view === 'contacts' && (
-                <div style={{ flex: 1, overflowY: 'auto', margin: '4px 0 8px' }}>
-                  <div style={{ fontSize: 11, color: t.sub, marginBottom: 6 }}>通讯录（registry 号码簿）</div>
-                  {contactsErr && <div style={{ fontSize: 12, color: t.bad }}>{contactsErr}</div>}
-                  {contacts && contacts.length === 0 && <div style={{ fontSize: 12, color: t.muted }}>通讯录为空</div>}
-                  {contacts?.map((c) => (
-                    <button key={c.number} onClick={() => { setLocal({ num: c.number }); setView('dial') }}
-                      style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', background: t.key,
-                        border: '1px solid #2c2c2e', borderRadius: 12, padding: '7px 10px', marginBottom: 6, cursor: 'pointer', color: '#fff', fontSize: 13 }}>
-                      <img src={`${PHONE_BASE}/store/assets/l${c.level}.png`} alt={`L${c.level}`} style={{ height: 18 }} />
-                      <span style={{ flex: 1 }}>{c.displayName || c.agentDid.split(':').pop()}</span>
-                      <span style={{ color: t.sub, fontSize: 12 }}>{c.number}</span>
-                    </button>
-                  ))}
-                  <button onClick={() => setView('dial')} style={{ background: 'none', border: 'none', color: t.accent, fontSize: 12, cursor: 'pointer', marginTop: 4 }}>← 返回拨号</button>
-                </div>
-              )}
-
-              {view === 'usage' && (
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: 10 }}>
-                  <div style={{ fontSize: 11, color: t.sub }}>📊 电话用量（dshlib Agent Line）</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, width: '100%' }}>
-                    {[
-                      ['📞 通话', usage ? ((usage.callSeconds / 60).toFixed(1)) + ' 分' : '—'],
-                      ['💬 短信', usage ? usage.smsSent + ' 发 / ' + usage.smsReceived + ' 收' : '—'],
-                      ['📎 附件', usage ? (usage.attachmentBytes / 1048576).toFixed(2) + ' MB' : '—'],
-                      ['👥 群聊', usage ? usage.groupMsgs + ' 条' : '—'],
-                      ['📞 呼叫', usage ? usage.calls + ' 次' : '—'],
-                      ['🕒 更新', usage ? (usage.updatedAt || '').slice(11, 19) : '—'],
-                    ].map(([k, v], i) => (
-                      <div key={i} style={{ background: t.key, borderRadius: 12, padding: '10px 12px' }}>
-                        <div style={{ fontSize: 11, color: t.sub }}>{k}</div>
-                        <div style={{ fontSize: 18, fontWeight: 600, marginTop: 2 }}>{v}</div>
-                      </div>
-                    ))}
-                  </div>
-                  <button onClick={() => setView('dial')} style={{ background: 'none', border: 'none', color: t.accent, fontSize: 12, cursor: 'pointer', marginTop: 4 }}>← 返回拨号</button>
-                </div>
-              )}
-
-              {view === 'account' && (
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 4px' }}>
-                  <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 2 }}>📱 电话开户</div>
-                  <div style={{ fontSize: 10, color: t.sub, marginBottom: 8 }}>{AGENT_DID}</div>
-                  <div style={{ width: '100%', background: t.key, borderRadius: 12, padding: 10, marginBottom: 8 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6 }}>
-                    <span style={{ color: t.sub }}>🪙 积分余额</span>
-                    <span style={{ color: t.warn, fontWeight: 600 }}>{account.credits}</span>
-                  </div>
-                  <div style={{ fontSize: 11, color: t.sub, marginBottom: 4 }}>我的号码（最多 2 部）</div>
-                    {account.numbers.length === 0
-                      ? <div style={{ fontSize: 12, color: t.muted }}>尚未开户</div>
-                      : account.numbers.map((n) => (
-                        <div key={n} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, padding: '4px 0' }}>
-                          <span style={{ letterSpacing: 1 }}>{n}</span>
-                          <img src={`${PHONE_BASE}/store/assets/l3.png`} alt="L3" style={{ height: 14 }} />
-                        </div>
-                      ))}
-                    <div style={{ fontSize: 10, color: t.muted, marginTop: 4 }}>{account.numbers.length}/2</div>
-                  </div>
-                  {account.numbers.length < 2 && (
-                    <div style={{ width: '100%' }}>
-                      <input value={acctName} onChange={(e) => setAcctName(e.target.value)} placeholder="显示名（可选）"
-                        style={{ width: '100%', boxSizing: 'border-box', background: t.key, color: '#fff', border: '1px solid #2c2c2e', borderRadius: 10, padding: '7px 10px', fontSize: 13, marginBottom: 8 }} />
-                      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, fontSize: 11, color: t.sub, marginBottom: 8, cursor: 'pointer' }}>
-                        <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)}
-                          style={{ marginTop: 1, accentColor: t.accent }} />
-                        <span>我已阅读并同意<button onClick={(e) => { e.preventDefault(); setShowTerms(true) }} style={{ background: 'none', border: 'none', color: t.accent, fontSize: 11, cursor: 'pointer', padding: 0 }}>《服务说明（实验）》</button></span>
-                      </label>
-                      {showTerms && (
-                        <div style={{ marginBottom: 8, padding: 10, borderRadius: 10, background: t.key, maxHeight: 120, overflowY: 'auto', fontSize: 10, color: '#94a3b8', lineHeight: 1.7 }}>
-                          <b style={{ color: '#e2e8f0' }}>dsh-phone 服务说明（实验）</b><br />
-                          实验项目：不保证持续可用/无中断/无错误；服务可随时调整或终止。<br />
-                          记录号码、Agent 身份与用量元数据（时长/计数/大小）；不记录通话/短信/附件内容；数据不出售。<br />
-                          禁止骚扰、诈骗、垃圾信息等滥用；违规停用。<br />
-                          认证等级是"信任摘要"，不是"安全保证"；不构成安全/可靠/合法背书；交互风险自行承担。<br />
-                          责任限制：不承担间接/后果性损失；直接损失以实验能力为限。<br />
-                          <button onClick={() => setShowTerms(false)} style={{ background: 'none', border: 'none', color: t.accent, fontSize: 10, cursor: 'pointer', marginTop: 4 }}>关闭</button>
-                        </div>
-                      )}
-                      <button onClick={applyAccount} disabled={account.applying || !agreed}
-                        style={{ width: '100%', height: 38, borderRadius: 999, background: agreed ? t.ok : t.border, color: agreed ? '#fff' : t.sub, border: 0, fontSize: 14, cursor: agreed ? 'pointer' : 'not-allowed' }}>
-                        {account.applying ? '申请中…' : agreed ? '申请号码（开户）' : '请先勾选同意服务说明'}
-                      </button>
-                      {account.done && (
-                        <div style={{ marginTop: 8, padding: 10, borderRadius: 10, background: 'rgba(52,211,153,.12)', fontSize: 13, textAlign: 'center' }}>
-                          🎉 开户成功！<br /><span style={{ fontSize: 16, fontWeight: 600, letterSpacing: 1 }}>{account.done}</span>
-                          {account.welcome > 0 && <div style={{ marginTop: 6, fontSize: 13, color: t.warn }}>🪙 +{account.welcome} 积分（第一批开户礼）</div>}
-                        </div>
-                      )}
-                      {account.err && <div style={{ marginTop: 8, fontSize: 12, color: t.bad, textAlign: 'center' }}>{account.err}</div>}
-                    </div>
-                  )}
-                  <button onClick={() => setView('dial')} style={{ background: 'none', border: 'none', color: t.accent, fontSize: 12, cursor: 'pointer', marginTop: 8 }}>← 返回拨号</button>
-                </div>
-              )}
-
-              {view === 'theme' && (
-                <div style={{ flex: 1, overflowY: 'auto' }}>
-                  <div style={{ fontSize: 11, color: t.sub, marginBottom: 6 }}>🎨 主题皮肤</div>
-                  {Object.values(THEMES).map((th) => {
-                    const locked = th.unlock && !props.unlocked.includes(th.name)
-                    const active = props.theme.name === th.name
-                    return (
-                      <div key={th.name} onClick={() => {
-                        if (locked) { if (confirm(`解锁「${th.label}」需 ${th.unlock} 积分？`)) props.onUnlock(th.name) }
-                        else props.onSelectTheme(th.name)
-                      }}
-                        style={{ display: 'flex', alignItems: 'center', gap: 8, background: t.card, border: active ? `2px solid ${t.accent}` : `1px solid ${t.border}`,
-                          borderRadius: 12, padding: '8px 10px', marginBottom: 6, cursor: 'pointer' }}>
-                        <div style={{ width: 26, height: 26, borderRadius: 8, background: `linear-gradient(135deg, ${th.shell}, ${th.accent})`, border: `1px solid ${th.border}` }} />
-                        <span style={{ flex: 1, fontSize: 13, color: t.text }}>{th.label}</span>
-                        {locked
-                          ? <span style={{ fontSize: 11, color: t.warn }}>🪙 {th.unlock} 积分 · 点击解锁</span>
-                          : active
-                            ? <span style={{ fontSize: 11, color: t.ok }}>● 使用中</span>
-                            : <span style={{ fontSize: 11, color: t.sub }}>点击切换</span>}
-                      </div>
-                    )
-                  })}
-                  <button onClick={() => setView('dial')} style={{ background: 'none', border: 'none', color: t.accent, fontSize: 12, cursor: 'pointer', marginTop: 4 }}>← 返回拨号</button>
-                </div>
-              )}
-
-              {view === 'group' && (
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-                  <div style={{ fontSize: 11, color: t.sub, marginBottom: 6 }}>📡 dshlib 群 · 广播</div>
-                  <div style={{ flex: 1, overflowY: 'auto', marginBottom: 6, background: '#0c0c0e', borderRadius: 12, padding: 8 }}>
-                    {props.group.msgs.length === 0
-                      ? <div style={{ fontSize: 12, color: t.muted }}>群消息为空</div>
-                      : props.group.msgs.map((m, i) => (
-                        <div key={i} style={{ fontSize: 12, marginBottom: 5 }}>
-                          <span style={{ color: t.accent }}>{m.from.split('（')[0]}</span>{' '}<span>{m.text}</span>
-                        </div>
-                      ))}
-                  </div>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    <input value={groupInput} onChange={(e) => setGroupInput(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') sendGroup() }} placeholder="发到群聊"
-                      style={{ flex: 1, background: t.key, color: '#fff', border: '1px solid #2c2c2e', borderRadius: 10, padding: '7px 10px', fontSize: 13, boxSizing: 'border-box' }} />
-                    <button onClick={sendGroup} style={{ height: 32, padding: '0 14px', borderRadius: 999, background: t.accent, color: '#fff', border: 0, fontSize: 12, cursor: 'pointer' }}>发送</button>
-                  </div>
-                </div>
-              )}
-
-              {view === 'dial' && !props.call && (
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                  <input value={target} onChange={(e) => setLocal({ num: e.target.value })}
-                    style={{ width: '100%', boxSizing: 'border-box', background: 'transparent', color: '#fff',
-                      border: 'none', borderBottom: '1px solid #2c2c2e', padding: '6px 4px', fontSize: 24, textAlign: 'center', letterSpacing: 2, marginBottom: 10 }}
-                    placeholder="拨给 0002" />
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 8 }}>
-                    {['1','2','3','4','5','6','7','8','9','*','0','#'].map((k) => (
-                      <button key={k} onClick={() => setLocal({ num: target + k })} style={keyStyle}>
-                        {k}
-                        <span style={{ fontSize: 9, color: t.sub }}>{({ '2':'ABC','3':'DEF','4':'GHI','5':'JKL','6':'MNO','7':'PQRS','8':'TUV','9':'WXYZ' } as any)[k] || ''}</span>
-                      </button>
-                    ))}
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'center', gap: 36, marginTop: 4 }}>
-                    <button onClick={() => { setLocal({ num: '+86' }) }} style={roundBtn(t.key, 52)}>⌫<span style={{ fontSize: 9 }}>清除</span></button>
-                    <button onClick={dial} disabled={!!props.call} style={roundBtn(t.ok, 62)}>📞<span>拨号</span></button>
-                  </div>
-                </div>
-              )}
-
-              <div style={{ borderTop: '1px solid #2c2c2e', paddingTop: 8, marginTop: 6 }}>
-                <div style={{ fontSize: 10, color: t.sub, marginBottom: 4 }}>💬 短信（我 ↔ 对端）</div>
-                <div style={{ maxHeight: 92, overflowY: 'auto', marginBottom: 6 }}>
-                  {mySms.length === 0 && peerSms.length === 0 ? <div style={{ fontSize: 11, color: t.muted }}>暂无消息</div> : null}
-                  {[...peerSms, ...mySms].sort((a, b) => a.ts - b.ts).map((m, i) => (
-                    <div key={i} style={{ fontSize: 12, marginBottom: 4, textAlign: isMine(m) ? 'right' : 'left' }}>
-                      <div style={{ fontSize: 9, color: t.sub, marginBottom: 1 }}>{isMine(m) ? '我' : m.fromNumber}</div>
-                      <span style={{ display: 'inline-block', padding: '5px 11px', borderRadius: 15, maxWidth: '85%',
-                        background: isMine(m) ? t.msgMine : t.msgOther, color: t.text,
-                        borderTopRightRadius: isMine(m) ? 4 : 15, borderTopLeftRadius: isMine(m) ? 15 : 4 }}>
-                        {m.attachment ? (
-                          <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 4 }}>
-                            {m.attachment && m.attachment.url && (m.attachment.type.startsWith('image/') || /\.(png|jpe?g|gif|webp)$/i.test(m.attachment.name || ''))
-                              ? <img src={m.attachment.url} alt={m.attachment.name} style={{ maxWidth: 140, maxHeight: 90, borderRadius: 8, display: 'block' }} />
-                              : <span style={{ fontSize: 11 }}>📄 {m.attachment ? m.attachment.name : ''}（{m.attachment ? (m.attachment.size / 1024).toFixed(1) : 0}KB）</span>}
-                            <span style={{ fontSize: 8, color: t.sub }} title="SHA-256 前 16 位">#{m.attachment.hash}</span>
-                          </span>
-                        ) : m.text}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <input value={smsInput} onChange={(e) => setSmsInput(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') sendSms() }} placeholder="iMessage"
-                    style={{ flex: 1, background: t.key, color: '#fff', border: '1px solid #2c2c2e', borderRadius: 16, padding: '6px 12px', fontSize: 13, boxSizing: 'border-box' }} />
-                  <input ref={fileRef} type="file" style={{ display: 'none' }}
-                    onChange={(e) => { const f = e.target.files?.[0]; if (f) sendAttachment(f); e.target.value = '' }} />
-                  <button onClick={() => fileRef.current?.click()} style={{ background: 'none', border: 'none', fontSize: 16, cursor: 'pointer' }}>📎</button>
-                  <button onClick={sendSms} style={{ height: 30, padding: '0 14px', borderRadius: 999, background: t.msgMine, color: '#fff', border: 0, fontSize: 13, cursor: 'pointer' }}>发送</button>
-                </div>
-              </div>
-            </div>
-
-            <div style={{ width: 120, height: 4, background: t.border, borderRadius: 2, margin: '6px auto 2px' }} />
+            {view === 'home' && <div style={{ width: 120, height: 4, background: t.border, borderRadius: 2, margin: '6px auto 2px' }} />}
           </div>
         </div>
       )}
@@ -559,7 +384,80 @@ function PhoneOverlay(): JSX.Element {
   const [unlocked, setUnlocked] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem(UNLOCKED_KEY) || '[]') } catch { return [] } })
   function themeOf(id: 'A' | 'B'): Theme { return THEMES[(id === 'A' ? themeA : themeB)] || THEMES.classic }
   const [smsLog, setSmsLog] = useState<SmsMsg[]>([])
+  // ── RCS 群（团队协作空间）：群列表 + 当前群 + 群消息（经 registry）──
   const [groupMsgs, setGroupMsgs] = useState<Array<{ from: string; text: string; ts: number }>>([])
+  const [groupList, setGroupList] = useState<Array<{ groupId: string; name: string; memberCount: number }>>([])
+  const [currentGroup, setCurrentGroup] = useState<{ groupId: string; name: string; members: string[]; conversationId?: string; createdBy?: string } | null>(null)
+  const [groupMsgLog, setGroupMsgLog] = useState<Array<{ fromNumber: string; text: string; ts: number }>>([])
+  const groupLastSeq = useRef<Record<string, number>>({})
+
+  // 群列表加载（我是成员/创建者）
+  function loadGroupList(): void {
+    fetch(`${PHONE_BASE}/api/v1/phone/group/list?did=${encodeURIComponent(AGENT_DID)}`, { headers: { Accept: 'application/json' } })
+      .then((r) => r.json())
+      .then((d) => setGroupList(d.groups || []))
+      .catch(() => {})
+  }
+  // 创建群（人号码 + agent DID 混合成员）
+  async function createGroup(name: string, members: string[]): Promise<{ gid: string | null; error: string }> {
+    try {
+      const r = await (await fetch(`${PHONE_BASE}/api/v1/phone/group`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, creator: AGENT_DID, members }),
+      })).json()
+      if (r && r.ok && r.groupId) {
+        loadGroupList()
+        return { gid: r.groupId, error: '' }
+      }
+      return { gid: null, error: r?.error || '创建失败（成员需是号码簿中的号码或已注册 agent）' }
+    } catch { return { gid: null, error: '网络错误' } }
+  }
+  // 打开群会话：加载群详情 + 拉群消息
+  async function openGroup(groupId: string): Promise<void> {
+    try {
+      const g = await (await fetch(`${PHONE_BASE}/api/v1/phone/group/${groupId}`, { headers: { Accept: 'application/json' } })).json()
+      if (g && g.ok) setCurrentGroup({ groupId: g.groupId, name: g.name, members: g.members || [], ...(g.conversationId ? { conversationId: g.conversationId } : {}), ...(g.createdBy ? { createdBy: g.createdBy } : {}) })
+      setGroupMsgLog([])
+      pollGroupMessages(groupId, true)
+    } catch {}
+  }
+  // 群消息拉取（增量，复用收件箱轮询；群消息带 groupId）
+  function pollGroupMessages(groupId: string, force = false): void {
+    const since = force ? 0 : (groupLastSeq.current[groupId] || 0)
+    fetch(`${PHONE_BASE}/api/v1/phone/messages?did=${encodeURIComponent(AGENT_DID)}&since=${since}`, { headers: { Accept: 'application/json' }, cache: 'no-store' })
+      .then((r) => r.json())
+      .then((d) => {
+        const gm = (d.messages || []).filter((m: any) => m.groupId === groupId)
+        if (gm.length) {
+          groupLastSeq.current[groupId] = Math.max(...gm.map((m: any) => m.seq || 0), groupLastSeq.current[groupId] || 0)
+          setGroupMsgLog((l) => [...l, ...gm.map((m: any) => ({ fromNumber: m.fromNumber || '对端', text: m.text || '', ts: Date.parse(m.at) || Date.now() }))])
+        }
+      })
+      .catch(() => {})
+  }
+  // 发送群消息（广播；@agent 走投递，@人仅广播提及）返回投递结果供 UI 反馈
+  async function sendGroup(from: string, text: string): Promise<{ delivered: string[]; failed: string[] }> {
+    const res = { delivered: [] as string[], failed: [] as string[] }
+    if (!currentGroup) return res
+    const conv = currentGroup.conversationId ? { conversationId: currentGroup.conversationId } : {}
+    fetch(`${PHONE_BASE}/api/v1/phone/group/message`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: AGENT_DID, fromNumber: MINE_NUM[from === 'A' ? 'A' : 'B'], groupId: currentGroup.groupId, ...conv, text }),
+    }).catch(() => {})
+    // @agent 投递：只有 @ 的目标是"群成员里的 agent DID"才投递（@人仅提及，不投递）
+    const m = text.match(/^@([\w.-]+)\s+([\s\S]*)$/)
+    if (m) {
+      const mentioned = m[1]
+      const isAgentMember = (currentGroup.members || []).some((mm) => mm === `did:cha2a:agent:${mentioned}`)
+      if (isAgentMember) {
+        const ok = await sendSmsToAgent(mentioned, m[2], from === 'A' ? '+86 95123 0001' : '+86 95123 0002', 'group', currentGroup.groupId, currentGroup.conversationId)
+        if (ok) res.delivered.push(mentioned)
+        else res.failed.push(mentioned)
+      }
+    }
+    setGroupMsgLog((l) => [...l, { fromNumber: MINE_NUM[from === 'A' ? 'A' : 'B'], text, ts: Date.now() }])
+    return res
+  }
   // 共享通话状态：A 拨 B → 唤起 B（B 自动打开显示来电）
   const [call, setCall] = useState<{ stage: 'ringing' | 'connected'; callerId: 'A' | 'B'; calleeId: 'A' | 'B'; call?: any; connectedAt: number } | null>(null)
 
@@ -588,8 +486,9 @@ function PhoneOverlay(): JSX.Element {
       const d = dragRef.current
       if (!d) return
       if (Math.abs(ev.clientX - (d.dx + pos[id].x)) > 4 || Math.abs(ev.clientY - (d.dy + pos[id].y)) > 4) d.moved = true
-      const x = Math.max(26, Math.min(window.innerWidth - 26, ev.clientX - d.dx))
-      const y = Math.max(26, Math.min(window.innerHeight - 26, ev.clientY - d.dy))
+      // 不限制边界：支持把图标拖到浏览器可视范围之外（跨屏/贴边）
+      const x = ev.clientX - d.dx
+      const y = ev.clientY - d.dy
       setPos((p) => ({ ...p, [d.id]: { x, y } }))
     }
     const onUp = () => {
@@ -608,11 +507,45 @@ function PhoneOverlay(): JSX.Element {
   }
 
   const [lastSeq, setLastSeq] = useState(0)
-  const MINE_NUM = { A: '+86 95123 0001', B: '+86 95123 0002' } as Record<'A' | 'B', string>
-  const PEER_NUM = { A: '+86 95123 0002', B: '+86 95123 0001' } as Record<'A' | 'B', string>
+
+  // @agent 投递（短信和群聊共用）：resolve→locate→ 投递到 agent 会话
+  // source: 'sms'（回短信）| 'group'（回群广播）；groupId 群聊时带；groupConvId 群级会话 id（RCS 持续会话）
+  async function sendSmsToAgent(agentName: string, content: string, fromNumber: string, source: 'sms' | 'group' = 'sms', groupId?: string, groupConvId?: string): Promise<boolean> {
+    const agentDid = `did:cha2a:agent:${agentName}`
+    try {
+      const loc = await (await fetch(`${PHONE_BASE}/api/v1/agent/locate?did=${encodeURIComponent(agentDid)}`, { headers: { Accept: 'application/json' } })).json()
+      if (loc && loc.bound && loc.sessionId) {
+        const snap = (clientCtx as any)?.sessions?.list?.getSnapshot?.()
+        const row = snap ? (snap.byId || {})[loc.sessionId] : undefined
+        const binding = row ? (clientCtx as any)?.sessions?.binding?.(loc.sessionId) : null
+        console.log('[dsh-phone] @投递:', agentDid, 'locate-bound:', !!loc.bound, 'row:', !!row, 'binding:', !!binding, 'prompt:', !!(binding && binding.session && binding.session.prompt))
+        if (binding && binding.session && binding.session.prompt) {
+          // 群聊用群级 conversationId（持续会话）；短信用临时会话 id
+          const conversationId = source === 'group' && groupConvId ? groupConvId : `${source}-${fromNumber}-${Date.now()}`
+          const srcTag = `<dsh-phone>{"source":"${source}","fromNumber":"${fromNumber}","conversationId":"${conversationId}"${groupId ? `,"groupId":"${groupId}"` : ''}}</dsh-phone>`
+          const prompt = source === 'group'
+            ? `${srcTag} [群聊消息] ${fromNumber} 在群里发来消息，请直接用一句话回复（会回发到群里），不要解释不要转述。消息：${content}`
+            : `${srcTag} [电话短信] 号码 ${fromNumber} 发来短信，请直接用一句话回复这条短信的内容（不要解释、不要转述），你的回复会原样回给该号码。短信内容：${content}`
+          await binding.session.prompt([{ type: 'text', text: prompt }], 'queue')
+          return true
+        }
+      }
+    } catch (e) { console.error('[dsh-phone] @agent 异常:', String(e).slice(0, 120)) }
+    return false
+  }
 
   // 短信经中继发送（registry 投递 + 收件箱；同页与跨设备同链路）
   async function sendSms(from: 'A' | 'B', text?: string, attachment?: SmsMsg['attachment']): Promise<void> {
+    // @agent 投递：文本以 @<agent名> 开头 → resolve→locate→ 投递到 agent 会话（智能体互联网寻址）
+    const m = text && text.match(/^@([\w.-]+)\s+([\s\S]*)$/)
+    if (m && !attachment) {
+      const agentName = m[1]
+      const content = m[2].trim()
+      const fromNumber = from === 'A' ? '+86 95123 0001' : '+86 95123 0002'
+      const delivered = await sendSmsToAgent(agentName, content, fromNumber)
+      setSmsLog((l) => [...l, { fromNumber: `@${agentName}`, text: content, ts: Date.now() }])
+      return
+    }
     const to = PEER_NUM[from]
     let att = attachment
     if (attachment && !attachment.fileId) {
@@ -667,11 +600,8 @@ function PhoneOverlay(): JSX.Element {
     else { setThemeB(name); localStorage.setItem(THEME_KEY + '-b', name) }
   }
 
-  function sendGroup(from: string, text: string): void {
-    setGroupMsgs((l) => [...l, { from, text, ts: Date.now() }])
-  }
 
-  const AGENT_DID = 'did:cha2a:agent:dshlib'
+  
   function reportUsage(type: string, amount: number): void {
     fetch(`${PHONE_BASE}/api/v1/phone/usage`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -858,10 +788,10 @@ function PhoneOverlay(): JSX.Element {
     <>
       <PhonePanel id="A" label="dshlib · 电话 A" ownNumber="+86 95123 0001" otherNumber="+86 95123 0002"
         badgeLevel={3} smsList={smsLog} onSendSms={sendSms} voice={voiceFace}
-        group={{ msgs: groupMsgs, onSend: sendGroup }} onReport={reportUsage} theme={themeOf('A')} unlocked={unlocked} onUnlock={onUnlock} onSelectTheme={(n) => onSelectTheme('A', n)} top={topPanel === 'A'} onFocus={() => setTopPanel('A')} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} pos={pos.A} onDragStart={(e) => startDrag('A', e)} justDragged={justDragged} />
+        group={{ list: groupList, current: currentGroup, msgs: groupMsgLog, onLoadList: loadGroupList, onCreate: createGroup, onOpen: (gid) => { setCurrentGroup(null); setGroupMsgLog([]); return openGroup(gid) }, onSend: sendGroup, onBack: () => { setCurrentGroup(null); setGroupMsgLog([]) } }} onReport={reportUsage} theme={themeOf('A')} unlocked={unlocked} onUnlock={onUnlock} onSelectTheme={(n) => onSelectTheme('A', n)} top={topPanel === 'A'} onFocus={() => setTopPanel('A')} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} pos={pos.A} onDragStart={(e) => startDrag('A', e)} justDragged={justDragged} />
       <PhonePanel id="B" label="dshlib · 电话 B" ownNumber="+86 95123 0002" otherNumber="+86 95123 0001"
         badgeLevel={3} smsList={smsLog} onSendSms={sendSms} voice={voiceFace}
-        group={{ msgs: groupMsgs, onSend: sendGroup }} onReport={reportUsage} theme={themeOf('B')} unlocked={unlocked} onUnlock={onUnlock} onSelectTheme={(n) => onSelectTheme('B', n)} top={topPanel === 'B'} onFocus={() => setTopPanel('B')} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} pos={pos.B} onDragStart={(e) => startDrag('B', e)} justDragged={justDragged} />
+        group={{ list: groupList, current: currentGroup, msgs: groupMsgLog, onLoadList: loadGroupList, onCreate: createGroup, onOpen: (gid) => { setCurrentGroup(null); setGroupMsgLog([]); return openGroup(gid) }, onSend: sendGroup, onBack: () => { setCurrentGroup(null); setGroupMsgLog([]) } }} onReport={reportUsage} theme={themeOf('B')} unlocked={unlocked} onUnlock={onUnlock} onSelectTheme={(n) => onSelectTheme('B', n)} top={topPanel === 'B'} onFocus={() => setTopPanel('B')} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} pos={pos.B} onDragStart={(e) => startDrag('B', e)} justDragged={justDragged} />
     </>
   )
 }
