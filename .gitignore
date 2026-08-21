@@ -2,3 +2,6 @@ node_modules/
 lib/
 *.log
 .DS_Store
+
+# 内部调试实录（本地认知，不上传）
+docs/跨公网语音调试实录.md
