@@ -142,6 +142,9 @@ function PhonePanel(props: {
   onDial(fromId: 'A' | 'B', target: string): void
   onAnswer(): void
   onHangup(): void
+  pos: { x: number; y: number }
+  onDragStart(e: React.PointerEvent): void
+  justDragged: boolean
 }): JSX.Element {
   const t = props.theme
   const [open, setOpen] = useState(false)
@@ -253,7 +256,7 @@ function PhonePanel(props: {
   const screenRadius = t.shape === 'squared' ? 18 : t.shape === 'retro' ? 28 : 34
   const keyRadius = t.keys === 'circle' ? '50%' : t.keys === 'square' ? 12 : 6
   const shellStyle: React.CSSProperties = {
-    position: 'fixed', right: props.id === 'A' ? 18 : 82, bottom: 150, width: 300,
+    position: 'fixed', left: props.pos.x - 150, top: props.pos.y - 690, width: 300,
     background: t.shell, borderRadius: shellRadius, border: `2px solid ${props.top ? t.accent : t.border}`,
     boxShadow: '0 20px 60px rgba(0,0,0,.6)', padding: '8px 8px 12px', zIndex: props.top ? 1100 : 1000, fontFamily: t.font,
   }
@@ -273,10 +276,11 @@ function PhonePanel(props: {
   return (
     <>
       <button
-        onClick={() => { props.onFocus(); setOpen(!open) }}
-        style={{ position: 'fixed', right: props.id === 'A' ? 18 : 82, bottom: 88, width: 52, height: 52, borderRadius: '50%',
+        onClick={() => { if (!props.justDragged) { props.onFocus(); setOpen(!open) } }}
+        onPointerDown={props.onDragStart}
+        style={{ position: 'fixed', left: props.pos.x - 26, top: props.pos.y - 26, width: 52, height: 52, borderRadius: '50%',
           background: t.key, color: t.accent, border: incoming ? '2px solid #22d3ee' : '1px solid #3a3a3c',
-          fontSize: 20, cursor: 'pointer', zIndex: 999, boxShadow: '0 4px 14px rgba(0,0,0,.4)' }}
+          fontSize: 20, cursor: 'grab', zIndex: 999, boxShadow: '0 4px 14px rgba(0,0,0,.4)', touchAction: 'none' }}
         aria-label={`dsh-phone ${props.id}`} title={`${props.label} · ${props.ownNumber}`}
       >
         📞{incoming ? '🔔' : ''}
@@ -559,6 +563,50 @@ function PhoneOverlay(): JSX.Element {
   // 共享通话状态：A 拨 B → 唤起 B（B 自动打开显示来电）
   const [call, setCall] = useState<{ stage: 'ringing' | 'connected'; callerId: 'A' | 'B'; calleeId: 'A' | 'B'; call?: any; connectedAt: number } | null>(null)
 
+  // ── 每部电话独立位置（拖动锚点，屏幕坐标 left/top；localStorage 持久化）──
+  const POS_KEY = 'dsh-phone-pos'
+  function loadPos(): Record<'A' | 'B', { x: number; y: number }> {
+    try {
+      const d = JSON.parse(localStorage.getItem(POS_KEY) || '{}')
+      return {
+        A: { x: typeof d.A?.x === 'number' ? d.A.x : window.innerWidth - 90, y: typeof d.A?.y === 'number' ? d.A.y : window.innerHeight - 160 },
+        B: { x: typeof d.B?.x === 'number' ? d.B.x : window.innerWidth - 150, y: typeof d.B?.y === 'number' ? d.B.y : window.innerHeight - 160 },
+      }
+    } catch { return { A: { x: window.innerWidth - 90, y: window.innerHeight - 160 }, B: { x: window.innerWidth - 150, y: window.innerHeight - 160 } } }
+  }
+  const [pos, setPos] = useState<Record<'A' | 'B', { x: number; y: number }>>(loadPos)
+  const posRef = useRef(pos)
+  posRef.current = pos
+  const dragRef = useRef<{ id: 'A' | 'B'; dx: number; dy: number; moved: boolean } | null>(null)
+  const [justDragged, setJustDragged] = useState(false)
+
+  function startDrag(id: 'A' | 'B', e: React.PointerEvent): void {
+    e.preventDefault()
+    dragRef.current = { id, dx: e.clientX - pos[id].x, dy: e.clientY - pos[id].y, moved: false }
+    setTopPanel(id)
+    const onMove = (ev: PointerEvent) => {
+      const d = dragRef.current
+      if (!d) return
+      if (Math.abs(ev.clientX - (d.dx + pos[id].x)) > 4 || Math.abs(ev.clientY - (d.dy + pos[id].y)) > 4) d.moved = true
+      const x = Math.max(26, Math.min(window.innerWidth - 26, ev.clientX - d.dx))
+      const y = Math.max(26, Math.min(window.innerHeight - 26, ev.clientY - d.dy))
+      setPos((p) => ({ ...p, [d.id]: { x, y } }))
+    }
+    const onUp = () => {
+      const d = dragRef.current
+      if (d && d.moved) {
+        setJustDragged(true)
+        setTimeout(() => { setJustDragged(false) }, 120)
+      }
+      dragRef.current = null
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      try { localStorage.setItem(POS_KEY, JSON.stringify(posRef.current)) } catch {}
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+
   const [lastSeq, setLastSeq] = useState(0)
   const MINE_NUM = { A: '+86 95123 0001', B: '+86 95123 0002' } as Record<'A' | 'B', string>
   const PEER_NUM = { A: '+86 95123 0002', B: '+86 95123 0001' } as Record<'A' | 'B', string>
@@ -810,10 +858,10 @@ function PhoneOverlay(): JSX.Element {
     <>
       <PhonePanel id="A" label="dshlib · 电话 A" ownNumber="+86 95123 0001" otherNumber="+86 95123 0002"
         badgeLevel={3} smsList={smsLog} onSendSms={sendSms} voice={voiceFace}
-        group={{ msgs: groupMsgs, onSend: sendGroup }} onReport={reportUsage} theme={themeOf('A')} unlocked={unlocked} onUnlock={onUnlock} onSelectTheme={(n) => onSelectTheme('A', n)} top={topPanel === 'A'} onFocus={() => setTopPanel('A')} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} />
+        group={{ msgs: groupMsgs, onSend: sendGroup }} onReport={reportUsage} theme={themeOf('A')} unlocked={unlocked} onUnlock={onUnlock} onSelectTheme={(n) => onSelectTheme('A', n)} top={topPanel === 'A'} onFocus={() => setTopPanel('A')} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} pos={pos.A} onDragStart={(e) => startDrag('A', e)} justDragged={justDragged} />
       <PhonePanel id="B" label="dshlib · 电话 B" ownNumber="+86 95123 0002" otherNumber="+86 95123 0001"
         badgeLevel={3} smsList={smsLog} onSendSms={sendSms} voice={voiceFace}
-        group={{ msgs: groupMsgs, onSend: sendGroup }} onReport={reportUsage} theme={themeOf('B')} unlocked={unlocked} onUnlock={onUnlock} onSelectTheme={(n) => onSelectTheme('B', n)} top={topPanel === 'B'} onFocus={() => setTopPanel('B')} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} />
+        group={{ msgs: groupMsgs, onSend: sendGroup }} onReport={reportUsage} theme={themeOf('B')} unlocked={unlocked} onUnlock={onUnlock} onSelectTheme={(n) => onSelectTheme('B', n)} top={topPanel === 'B'} onFocus={() => setTopPanel('B')} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} pos={pos.B} onDragStart={(e) => startDrag('B', e)} justDragged={justDragged} />
     </>
   )
 }
