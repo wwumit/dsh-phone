@@ -159,7 +159,7 @@ function PhonePanel(props: {
   ownNumber: string
   otherNumber: string
   smsList: SmsMsg[]
-  onSendSms: (from: 'A' | 'B', text?: string, attachment?: SmsMsg['attachment']) => void
+  onSendSms: (from: 'A' | 'B', text?: string, attachment?: SmsMsg['attachment'], to?: string) => void
   voice: { active: boolean; muted: boolean; onToggleMute(): void }
   group: {
     list: Array<{ groupId: string; name: string; memberCount: number }>
@@ -169,6 +169,9 @@ function PhonePanel(props: {
     onCreate(name: string, members: string[]): Promise<string | null>
     onOpen(groupId: string): void
     onSend(from: 'A' | 'B', text: string): Promise<{ delivered: string[]; failed: string[] }> | void
+    onLeave(groupId: string, member: string): Promise<{ ok: boolean; error?: string }>
+    onDisband(groupId: string): Promise<{ ok: boolean; error?: string }>
+    onAnnouncement(groupId: string, text: string): Promise<{ ok: boolean; error?: string }>
     onBack(): void
   }
   onReport(type: string, amount: number): void
@@ -179,7 +182,7 @@ function PhonePanel(props: {
   top: boolean
   onFocus(): void
   badgeLevel: number
-  call: { stage: 'ringing' | 'connected'; callerId: 'A' | 'B'; calleeId: 'A' | 'B'; call?: any; connectedAt: number } | null
+  call: { stage: 'ringing' | 'connected'; callerId: string; calleeId: string; call?: any; connectedAt: number } | null
   onDial(fromId: 'A' | 'B', target: string): void
   onAnswer(): void
   onHangup(): void
@@ -273,7 +276,7 @@ function PhonePanel(props: {
   }
   const screenStyle: React.CSSProperties = {
     background: t.screen, borderRadius: screenRadius, overflow: 'hidden', color: t.text,
-    display: 'flex', flexDirection: 'column', height: 660,
+    display: 'flex', flexDirection: 'column', height: 660, position: 'relative',
   }
   const roundBtn = (bg: string, w = 56): React.CSSProperties => ({
     width: w, height: w, borderRadius: '50%', background: bg, color: '#fff', border: 0, fontSize: 11, cursor: 'pointer',
@@ -295,11 +298,14 @@ function PhonePanel(props: {
   }
   const appActions: AppActions = {
     nav, back,
-    sendSms: (from, text, attachment) => props.onSendSms(from, text, attachment),
+    sendSms: (from, text, attachment, to) => props.onSendSms(from, text, attachment, to),
     sendGroup: (from, text) => props.group.onSend(from, text),
     loadContacts, loadAccount, loadUsage,
     loadGroupList: () => props.group.onLoadList(),
     openGroup: (gid) => props.group.onOpen(gid),
+    leaveGroup: (gid, member) => props.group.onLeave(gid, member),
+    disbandGroup: (gid) => props.group.onDisband(gid),
+    setAnnouncement: (gid, text) => props.group.onAnnouncement(gid, text),
     createGroup: (name, members) => props.group.onCreate(name, members),
     groupBack: () => props.group.onBack(),
     applyAccount,
@@ -370,6 +376,34 @@ function PhonePanel(props: {
             </div>
 
             {view === 'home' && <div style={{ width: 120, height: 4, background: t.border, borderRadius: 2, margin: '6px auto 2px' }} />}
+
+            {/* 来电 / 呼叫中 / 通话中 覆盖层（任意视图之上） */}
+            {props.call && (
+              <div style={{ position: 'absolute', inset: 0, zIndex: 20, background: 'rgba(0,0,0,.88)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 18 }}>
+                {incoming ? (
+                  <>
+                    <div style={{ fontSize: 15, color: '#fff', fontWeight: 600 }}>来电</div>
+                    <div style={{ fontSize: 13, color: '#8e8e93' }}>{props.call.callerId === 'A' ? '电话 A' : props.call.callerId === 'B' ? '电话 B' : props.call.callerId}</div>
+                    <div style={{ display: 'flex', gap: 26 }}>
+                      <button onClick={() => props.onAnswer()} style={{ width: 64, height: 64, borderRadius: '50%', background: '#34c759', color: '#fff', border: 0, fontSize: 12, cursor: 'pointer' }}>接听</button>
+                      <button onClick={() => props.onHangup()} style={{ width: 64, height: 64, borderRadius: '50%', background: '#ff3b30', color: '#fff', border: 0, fontSize: 12, cursor: 'pointer' }}>挂断</button>
+                    </div>
+                  </>
+                ) : isCaller ? (
+                  <>
+                    <div style={{ fontSize: 15, color: '#fff', fontWeight: 600 }}>呼叫中…</div>
+                    <div style={{ fontSize: 13, color: '#8e8e93' }}>{props.call.calleeId === 'A' ? '电话 A' : props.call.calleeId === 'B' ? '电话 B' : props.call.calleeId}</div>
+                    <button onClick={() => props.onHangup()} style={{ width: 64, height: 64, borderRadius: '50%', background: '#ff3b30', color: '#fff', border: 0, fontSize: 12, cursor: 'pointer' }}>挂断</button>
+                  </>
+                ) : isConnected ? (
+                  <>
+                    <div style={{ fontSize: 15, color: '#fff', fontWeight: 600 }}>通话中</div>
+                    <div style={{ fontSize: 13, color: '#8e8e93' }}>{props.call.callerId === 'A' ? '电话 A' : props.call.callerId === 'B' ? '电话 B' : props.call.callerId}</div>
+                    <button onClick={() => props.onHangup()} style={{ width: 64, height: 64, borderRadius: '50%', background: '#ff3b30', color: '#fff', border: 0, fontSize: 12, cursor: 'pointer' }}>挂断</button>
+                  </>
+                ) : null}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -416,7 +450,7 @@ function PhoneOverlay(): JSX.Element {
   async function openGroup(groupId: string): Promise<void> {
     try {
       const g = await (await fetch(`${PHONE_BASE}/api/v1/phone/group/${groupId}`, { headers: { Accept: 'application/json' } })).json()
-      if (g && g.ok) setCurrentGroup({ groupId: g.groupId, name: g.name, members: g.members || [], ...(g.conversationId ? { conversationId: g.conversationId } : {}), ...(g.createdBy ? { createdBy: g.createdBy } : {}) })
+      if (g && g.ok) setCurrentGroup({ groupId: g.groupId, name: g.name, members: g.members || [], ...(g.conversationId ? { conversationId: g.conversationId } : {}), ...(g.createdBy ? { createdBy: g.createdBy } : {}), ...(g.announcement ? { announcement: g.announcement } : {}) })
       setGroupMsgLog([])
       pollGroupMessages(groupId, true)
     } catch {}
@@ -430,36 +464,86 @@ function PhoneOverlay(): JSX.Element {
         const gm = (d.messages || []).filter((m: any) => m.groupId === groupId)
         if (gm.length) {
           groupLastSeq.current[groupId] = Math.max(...gm.map((m: any) => m.seq || 0), groupLastSeq.current[groupId] || 0)
-          setGroupMsgLog((l) => [...l, ...gm.map((m: any) => ({ fromNumber: m.fromNumber || '对端', text: m.text || '', ts: Date.parse(m.at) || Date.now() }))])
+          const mapped = gm.map((m: any) => ({ fromNumber: m.fromNumber || '对端', text: m.text || '', ts: Date.parse(m.at) || Date.now() }))
+          // force（打开群）：全量替换（防与轮询竞争重复）；增量：追加
+          if (force) setGroupMsgLog(mapped)
+          else setGroupMsgLog((l) => [...l, ...mapped])
         }
       })
       .catch(() => {})
   }
   // 发送群消息（广播；@agent 走投递，@人仅广播提及）返回投递结果供 UI 反馈
-  async function sendGroup(from: string, text: string): Promise<{ delivered: string[]; failed: string[] }> {
-    const res = { delivered: [] as string[], failed: [] as string[] }
+  async function sendGroup(from: string, text: string): Promise<{ delivered: string[]; failed: string[]; error?: string }> {
+    const res = { delivered: [] as string[], failed: [] as string[], error: undefined as string | undefined }
     if (!currentGroup) return res
+    // 提取所有 @ 提及（任意位置：开头/句中/句尾）
+    const mentions = [...new Set([...text.matchAll(/@([\w.-]+)/g)].map((m) => m[1]))]
+    // 成员校验：所有 @ 的目标必须在群里（agent 短名 或 号码按 +86 归一）
+    const normNum = (s: string) => s.replace(/^\+86/, '').replace(/[^0-9]/g, '')
+    const notInGroup = mentions.filter((name) => !(currentGroup.members || []).some((mm) =>
+      mm === `did:cha2a:agent:${name}` || (!mm.startsWith('did:') && normNum(mm) === normNum(name))))
+    if (notInGroup.length) { res.error = `${notInGroup.join('、')} 不在本群，无法 @`; return res }
     const conv = currentGroup.conversationId ? { conversationId: currentGroup.conversationId } : {}
-    fetch(`${PHONE_BASE}/api/v1/phone/group/message`, {
+    const r = await fetch(`${PHONE_BASE}/api/v1/phone/group/message`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ from: AGENT_DID, fromNumber: MINE_NUM[from === 'A' ? 'A' : 'B'], groupId: currentGroup.groupId, ...conv, text }),
-    }).catch(() => {})
-    // @agent 投递：只有 @ 的目标是"群成员里的 agent DID"才投递（@人仅提及，不投递）
-    const m = text.match(/^@([\w.-]+)\s+([\s\S]*)$/)
-    if (m) {
-      const mentioned = m[1]
+    }).catch(() => null)
+    // 信任门禁/广播错误透传给 UI（409 = @agent 等级低于门禁；后端检查所有 @agent）
+    if (r && r.status >= 400) {
+      const d = await r.json().catch(() => null)
+      res.error = (d && (d.error || '')) || `broadcast failed (${r.status})`
+      if (d && d.denied) res.error += '：' + d.denied.map((x: any) => `@${x.agent}(L${x.level})`).join(', ')
+      return res
+    }
+    // @agent 投递：所有 @ 到的 agent 成员都投递（@人仅提及，不投递）；内容 = 整条消息
+    for (const mentioned of mentions) {
       const isAgentMember = (currentGroup.members || []).some((mm) => mm === `did:cha2a:agent:${mentioned}`)
       if (isAgentMember) {
-        const ok = await sendSmsToAgent(mentioned, m[2], from === 'A' ? '+86 95123 0001' : '+86 95123 0002', 'group', currentGroup.groupId, currentGroup.conversationId)
+        const ok = await sendSmsToAgent(mentioned, text, from === 'A' ? '+86 95123 0001' : '+86 95123 0002', 'group', currentGroup.groupId, currentGroup.conversationId)
         if (ok) res.delivered.push(mentioned)
         else res.failed.push(mentioned)
       }
     }
+    // 乐观追加（立即显示自己的消息）+ 立即 force 刷新（替换为生产全量，防乐观+轮询重复）
     setGroupMsgLog((l) => [...l, { fromNumber: MINE_NUM[from === 'A' ? 'A' : 'B'], text, ts: Date.now() }])
+    pollGroupMessages(currentGroup.groupId, true)
     return res
   }
+  // 退出群（成员自助）
+  async function leaveGroup(groupId: string, member: string): Promise<{ ok: boolean; error?: string }> {
+    try {
+      const r = await (await fetch(`${PHONE_BASE}/api/v1/phone/group/leave`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ groupId, member }),
+      })).json()
+      if (r && r.ok) { loadGroupList(); return { ok: true } }
+      return { ok: false, error: r?.error || '退出失败' }
+    } catch { return { ok: false, error: '网络错误' } }
+  }
+  // 解散群（管理操作）
+  async function disbandGroup(groupId: string): Promise<{ ok: boolean; error?: string }> {
+    try {
+      const r = await (await fetch(`${PHONE_BASE}/api/v1/phone/group/disband`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ groupId, actor: AGENT_DID }),
+      })).json()
+      if (r && r.ok) { loadGroupList(); return { ok: true } }
+      return { ok: false, error: r?.error || '解散失败' }
+    } catch { return { ok: false, error: '网络错误' } }
+  }
+  // 群公告（管理操作）
+  async function setAnnouncement(groupId: string, text: string): Promise<{ ok: boolean; error?: string }> {
+    try {
+      const r = await (await fetch(`${PHONE_BASE}/api/v1/phone/group/announcement`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ groupId, text, actor: AGENT_DID }),
+      })).json()
+      if (r && r.ok) { loadGroupList(); return { ok: true } }
+      return { ok: false, error: r?.error || '公告设置失败' }
+    } catch { return { ok: false, error: '网络错误' } }
+  }
   // 共享通话状态：A 拨 B → 唤起 B（B 自动打开显示来电）
-  const [call, setCall] = useState<{ stage: 'ringing' | 'connected'; callerId: 'A' | 'B'; calleeId: 'A' | 'B'; call?: any; connectedAt: number } | null>(null)
+  const [call, setCall] = useState<{ stage: 'ringing' | 'connected'; callerId: string; calleeId: string; call?: any; connectedAt: number } | null>(null)
 
   // ── 每部电话独立位置（拖动锚点，屏幕坐标 left/top；localStorage 持久化）──
   const POS_KEY = 'dsh-phone-pos'
@@ -518,24 +602,27 @@ function PhoneOverlay(): JSX.Element {
         const snap = (clientCtx as any)?.sessions?.list?.getSnapshot?.()
         const row = snap ? (snap.byId || {})[loc.sessionId] : undefined
         const binding = row ? (clientCtx as any)?.sessions?.binding?.(loc.sessionId) : null
-        console.log('[dsh-phone] @投递:', agentDid, 'locate-bound:', !!loc.bound, 'row:', !!row, 'binding:', !!binding, 'prompt:', !!(binding && binding.session && binding.session.prompt))
         if (binding && binding.session && binding.session.prompt) {
-          // 群聊用群级 conversationId（持续会话）；短信用临时会话 id
+          // 本实例会话存在 → 快路径直接注入（实例内，低延迟）
           const conversationId = source === 'group' && groupConvId ? groupConvId : `${source}-${fromNumber}-${Date.now()}`
           const srcTag = `<dsh-phone>{"source":"${source}","fromNumber":"${fromNumber}","conversationId":"${conversationId}"${groupId ? `,"groupId":"${groupId}"` : ''}}</dsh-phone>`
           const prompt = source === 'group'
-            ? `${srcTag} [群聊消息] ${fromNumber} 在群里发来消息，请直接用一句话回复（会回发到群里），不要解释不要转述。消息：${content}`
-            : `${srcTag} [电话短信] 号码 ${fromNumber} 发来短信，请直接用一句话回复这条短信的内容（不要解释、不要转述），你的回复会原样回给该号码。短信内容：${content}`
+            ? `${srcTag} [群聊消息] ${fromNumber} 在群里发来消息，请直接回复（回复会原样发回群里）。消息：${content}`
+            : `${srcTag} [电话短信] 号码 ${fromNumber} 发来短信，请直接回复（你的回复会原样回给该号码）。短信内容：${content}`
           await binding.session.prompt([{ type: 'text', text: prompt }], 'queue')
           return true
         }
+        // 跨实例：locate 到会话但本实例无此会话（目标 agent 在别的 DSH 实例）
+        // → 消息已广播进 registry 收件箱，目标实例的 node 半会轮询处理 → 视为已投递，不报错
+        console.log(`[dsh-phone] @投递跨实例: ${agentDid} → 收件箱（目标实例处理）`)
+        return true
       }
     } catch (e) { console.error('[dsh-phone] @agent 异常:', String(e).slice(0, 120)) }
     return false
   }
 
   // 短信经中继发送（registry 投递 + 收件箱；同页与跨设备同链路）
-  async function sendSms(from: 'A' | 'B', text?: string, attachment?: SmsMsg['attachment']): Promise<void> {
+  async function sendSms(from: 'A' | 'B', text?: string, attachment?: SmsMsg['attachment'], to?: string): Promise<void> {
     // @agent 投递：文本以 @<agent名> 开头 → resolve→locate→ 投递到 agent 会话（智能体互联网寻址）
     const m = text && text.match(/^@([\w.-]+)\s+([\s\S]*)$/)
     if (m && !attachment) {
@@ -546,7 +633,7 @@ function PhoneOverlay(): JSX.Element {
       setSmsLog((l) => [...l, { fromNumber: `@${agentName}`, text: content, ts: Date.now() }])
       return
     }
-    const to = PEER_NUM[from]
+    const target = to || PEER_NUM[from]
     let att = attachment
     if (attachment && !attachment.fileId) {
       // 先上传附件拿 fileId
@@ -569,20 +656,31 @@ function PhoneOverlay(): JSX.Element {
         const d = await (await fetch(`${PHONE_BASE}/api/v1/phone/messages?did=${encodeURIComponent(AGENT_DID)}&since=${lastSeq}`, { headers: { Accept: 'application/json' }, cache: 'no-store' })).json()
         if (d.messages && d.messages.length) {
           setLastSeq(Math.max(...d.messages.map((m: any) => m.seq || 0)))
-          setSmsLog((l) => [...l, ...d.messages.filter((m: any) => !m.signal).map((m: any) => ({
+          // 短信列表：排除信令 + 群消息（群消息有自己的会话流）
+          setSmsLog((l) => [...l, ...d.messages.filter((m: any) => !m.signal && !m.groupId).map((m: any) => ({
             fromNumber: m.fromNumber || '对端', text: m.text || undefined,
             attachment: m.attachment ? { name: m.attachment.name, size: m.attachment.size, hash: m.attachment.hash, fileId: m.attachment.fileId, url: `${PHONE_BASE}/api/v1/phone/attachment/${m.attachment.fileId}`, type: 'application/octet-stream' } : undefined,
             ts: Date.parse(m.at) || Date.now(), seq: m.seq,
           }))])
+          // 群消息：当前打开了群 → 增量追加（seq > 已处理游标，防与 openGroup 全量拉取重复）
+          if (currentGroup) {
+            const gid = currentGroup.groupId
+            const base = groupLastSeq.current[gid] || 0
+            const gm = d.messages.filter((m: any) => m.groupId === gid && (m.seq || 0) > base)
+            if (gm.length) {
+              groupLastSeq.current[gid] = Math.max(...gm.map((m: any) => m.seq || 0), base)
+              setGroupMsgLog((l) => [...l, ...gm.map((m: any) => ({ fromNumber: m.fromNumber || '对端', text: m.text || '', ts: Date.parse(m.at) || Date.now() }))])
+            }
+          }
           // 信令消息（语音 offer/answer/candidate）→ 处理
           for (const m of d.messages) { if (m.signal) handleSignal(m) }
         }
       } catch {}
     }
     poll()
-    const t = setInterval(poll, 5000)
+    const t = setInterval(poll, 2500)
     return () => clearInterval(t)
-  }, [lastSeq])
+  }, [lastSeq, currentGroup])
 
   function onUnlock(name: string): void {
     const th = THEMES[name]
@@ -612,10 +710,25 @@ function PhoneOverlay(): JSX.Element {
   // ── 语音角色：本端是主叫还是被叫、本端号码 ──
   const myRole = useRef<'caller' | 'callee' | null>(null)
   const myNumRef = useRef<string | null>(null)
+  const callTargetRef = useRef<string | null>(null)   // 当前呼叫目标号码（跨设备信令寻址）
   const NUM_A = '+86951230001'
   const NUM_B = '+86951230002'
 
   // 拨号：解析号码 → 设置通话状态（ringing）→ 对端面板被唤起
+  // 振铃超时：30s 无应答自动挂断（防测试残留/对方不接一直响）
+  const ringingTimer = useRef<any>(null)
+  function armRingingTimeout(): void {
+    clearTimeout(ringingTimer.current)
+    ringingTimer.current = setTimeout(() => {
+      setCall((c) => {
+        if (c && c.stage === 'ringing') { reportUsage('call_seconds', 0); return null }
+        return c
+      })
+      try { endVoice() } catch { /* 无会话时忽略 */ }
+    }, 30000)
+  }
+  function clearRingingTimeout(): void { clearTimeout(ringingTimer.current) }
+
   async function onDial(fromId: 'A' | 'B', target: string): Promise<void> {
     reportUsage('calls', 1)
     myRole.current = 'caller'
@@ -625,22 +738,35 @@ function PhoneOverlay(): JSX.Element {
         headers: { Accept: 'application/json' },
       })
       const data = await res.json()
-      setCall({ stage: 'ringing', callerId: fromId, calleeId: (fromId === 'A' ? 'B' : 'A'), call: data, connectedAt: Date.now() })
+      // 呼叫目标 = resolve 返回的规范号码（跨设备寻址：信令发给被叫号码，非固定对端）
+      const targetNum = (data && data.number) || target.replace(/[^0-9+]/g, '')
+      callTargetRef.current = targetNum
+      // calleeId：目标为同页对端才映射对面面板（B 振铃）；跨设备用目标号码（B 面板不振铃，等对端设备）
+      const isPeer = targetNum === (fromId === 'A' ? NUM_B : NUM_A)
+      const calleeId = isPeer ? (fromId === 'A' ? 'B' : 'A') : targetNum
+      setCall({ stage: 'ringing', callerId: fromId, calleeId, call: data, connectedAt: Date.now() })
+      armRingingTimeout()
       // 主叫方立即发起语音建连（发 offer 经中继，被叫方收到即唤起）
       establishVoice()
     } catch {
-      setCall({ stage: 'ringing', callerId: fromId, calleeId: (fromId === 'A' ? 'B' : 'A'), call: { registered: false, reason: '解析失败' }, connectedAt: Date.now() })
+      const tNum = target.replace(/[^0-9+]/g, '')
+      const isPeer2 = tNum === (fromId === 'A' ? NUM_B : NUM_A)
+      setCall({ stage: 'ringing', callerId: fromId, calleeId: isPeer2 ? (fromId === 'A' ? 'B' : 'A') : tNum, call: { registered: false, reason: '解析失败' }, connectedAt: Date.now() })
+      armRingingTimeout()
     }
   }
 
   function onAnswer(): void {
     myRole.current = 'callee'
-    myNumRef.current = call?.calleeId === 'A' ? NUM_A : NUM_B
+    myNumRef.current = call?.calleeId === 'A' ? NUM_A : (call?.calleeId === 'B' ? NUM_B : (call?.calleeId || NUM_B))
+    console.log('[dsh-phone] onAnswer: role=callee myNum=' + myNumRef.current + ' pendingOffer=' + !!pendingOffer.current + ' pc=' + !!voiceRef.pc)
+    clearRingingTimeout()
     setCall((c) => (c ? { ...c, stage: 'connected', connectedAt: Date.now() } : c))
     establishVoice()
   }
 
   function onHangup(): void {
+    clearRingingTimeout()
     if (call) {
       const secs = Math.max(1, Math.round((Date.now() - call.connectedAt) / 1000))
       reportUsage('call_seconds', secs)
@@ -667,7 +793,8 @@ function PhoneOverlay(): JSX.Element {
 
   function sendSignal(type: string, data: any): void {
     const from = myNumRef.current || NUM_A
-    const to = from === NUM_A ? NUM_B : NUM_A
+    // 信令目标：优先当前呼叫目标（跨设备拨号目标号码）；同页 A↔B 回退固定对端
+    const to = callTargetRef.current || (from === NUM_A ? NUM_B : NUM_A)
     fetch(`${PHONE_BASE}/api/v1/phone/message`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ from: AGENT_DID, fromNumber: from, to, signal: { type, data } }),
@@ -695,15 +822,25 @@ function PhoneOverlay(): JSX.Element {
       try {
         if (sig.type === 'offer') {
           const selfEcho = !!myNumRef.current && m.fromNumber === myNumRef.current
-          // 唤起被叫方来电（跨设备：B 的页面收到 offer → 显示来电）
+          // 呼叫目标 = 主叫号码（应答/候选信令回主叫）
+          if (m.fromNumber && !selfEcho) callTargetRef.current = m.fromNumber.replace(/[^0-9+]/g, '')
+          // 唤起被叫方来电（跨设备：对端页面收到 offer → 显示来电）
           pendingOffer.current = sig.data
-          if (selfEcho) continue   // 同页回环：仅记录 pendingOffer，供本页对端面板接听时应答，不重复唤起/不应答
-          const fromNum = m.fromNumber === NUM_A ? 'A' : 'B'
-          const callerId = (fromNum === 'A' ? 'A' : 'B') as 'A' | 'B'
-          const calleeId = (fromNum === 'A' ? 'B' : 'A') as 'A' | 'B'
+          if (selfEcho) {
+            // 同页回环：唤起本页对端面板来电（可手动接听）
+            const calleePanel2 = m.to === NUM_A ? 'A' : 'B'
+            setCall({ stage: 'ringing', callerId: 'A', calleeId: calleePanel2, call: { registered: true }, connectedAt: Date.now() })
+            armRingingTimeout()
+            continue
+          }
+          const calleePanel = m.to === NUM_A ? 'A' : (m.to === NUM_B ? 'B' : (myNumRef.current === NUM_A ? 'A' : 'B'))
+          const callerPanel = m.fromNumber === NUM_A ? 'A' : (m.fromNumber === NUM_B ? 'B' : (m.fromNumber || 'remote'))
+          const callerId = callerPanel
+          const calleeId = calleePanel
           myRole.current = 'callee'
           myNumRef.current = m.to || NUM_B
           setCall({ stage: 'ringing', callerId, calleeId, call: { registered: true }, connectedAt: Date.now() })
+          armRingingTimeout()
           // 若本端已接听（voiceRef.pc 存在）→ 直接应答
           if (voiceRef.pc) {
             await voiceRef.pc.setRemoteDescription(sig.data)
@@ -713,6 +850,7 @@ function PhoneOverlay(): JSX.Element {
             sendSignal('answer', ans)
           }
         } else if (sig.type === 'answer') {
+          console.log('[dsh-phone] 收到 answer, pc=' + !!voiceRef.pc)
           await voiceRef.pc?.setRemoteDescription(sig.data)
           setVoiceState('connected')
           setCall((c) => (c ? { ...c, stage: 'connected' } : c))
@@ -727,6 +865,7 @@ function PhoneOverlay(): JSX.Element {
   }
 
   async function establishVoice(): Promise<void> {
+    console.log('[dsh-phone] establishVoice: role=' + myRole.current + ' pc=' + !!voiceRef.pc + ' pendingOffer=' + !!pendingOffer.current)
     if (voiceRef.pc) {
       // 同页回环：pc 已存在（本页主叫建的）→ 被叫面板接听时用现有 pc 应答
       if (myRole.current === 'callee' && pendingOffer.current) {
@@ -741,7 +880,12 @@ function PhoneOverlay(): JSX.Element {
       return
     }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      console.log('[dsh-phone] establishVoice: 请求麦克风…')
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true }).catch((e) => {
+        alert('[dsh-phone] 语音需要麦克风权限：请在浏览器地址栏允许使用麦克风（' + (e.name || '') + '）')
+        throw e
+      })
+      console.log('[dsh-phone] establishVoice: 麦克风 OK, 建 pc…')
       const p = new RTCPeerConnection(ICE)
       stream.getTracks().forEach((t) => p.addTrack(t, stream))
       p.onicecandidate = (e) => { if (e.candidate) sendSignal('candidate', e.candidate) }
@@ -752,6 +896,7 @@ function PhoneOverlay(): JSX.Element {
       }
       setPc(p); setLocalStream(stream)
       voiceRef.pc = p; voiceRef.local = stream
+      console.log('[dsh-phone] establishVoice: pc 就绪, role=' + myRole.current)
       if (myRole.current === 'caller') {
         // 主叫方：发起 offer
         const offer = await p.createOffer()
@@ -759,11 +904,14 @@ function PhoneOverlay(): JSX.Element {
         sendSignal('offer', offer)
       } else if (pendingOffer.current) {
         // 被叫方：offer 已由中继拉到（pendingOffer）→ 应答
+        console.log('[dsh-phone] 被叫应答: setRemoteDescription…')
         await p.setRemoteDescription(pendingOffer.current)
         pendingOffer.current = null
         flushCandidates()
+        console.log('[dsh-phone] 被叫应答: createAnswer…')
         const ans = await p.createAnswer()
         await p.setLocalDescription(ans)
+        console.log('[dsh-phone] 被叫应答: send answer')
         sendSignal('answer', ans)
       }
     } catch (e) { console.error('语音建连失败：', e) }
@@ -786,12 +934,12 @@ function PhoneOverlay(): JSX.Element {
 
   return (
     <>
-      <PhonePanel id="A" label="dshlib · 电话 A" ownNumber="+86 95123 0001" otherNumber="+86 95123 0002"
+      <PhonePanel id="A" label="dshlib · 电话 A" ownNumber={MINE_NUM.A} otherNumber={PEER_NUM.A}
         badgeLevel={3} smsList={smsLog} onSendSms={sendSms} voice={voiceFace}
-        group={{ list: groupList, current: currentGroup, msgs: groupMsgLog, onLoadList: loadGroupList, onCreate: createGroup, onOpen: (gid) => { setCurrentGroup(null); setGroupMsgLog([]); return openGroup(gid) }, onSend: sendGroup, onBack: () => { setCurrentGroup(null); setGroupMsgLog([]) } }} onReport={reportUsage} theme={themeOf('A')} unlocked={unlocked} onUnlock={onUnlock} onSelectTheme={(n) => onSelectTheme('A', n)} top={topPanel === 'A'} onFocus={() => setTopPanel('A')} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} pos={pos.A} onDragStart={(e) => startDrag('A', e)} justDragged={justDragged} />
-      <PhonePanel id="B" label="dshlib · 电话 B" ownNumber="+86 95123 0002" otherNumber="+86 95123 0001"
+        group={{ list: groupList, current: currentGroup, msgs: groupMsgLog, onLoadList: loadGroupList, onCreate: createGroup, onOpen: (gid) => { setCurrentGroup(null); setGroupMsgLog([]); return openGroup(gid) }, onSend: sendGroup, onLeave: leaveGroup, onDisband: disbandGroup, onAnnouncement: setAnnouncement, onBack: () => { setCurrentGroup(null); setGroupMsgLog([]) } }} onReport={reportUsage} theme={themeOf('A')} unlocked={unlocked} onUnlock={onUnlock} onSelectTheme={(n) => onSelectTheme('A', n)} top={topPanel === 'A'} onFocus={() => setTopPanel('A')} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} pos={pos.A} onDragStart={(e) => startDrag('A', e)} justDragged={justDragged} />
+      <PhonePanel id="B" label="dshlib · 电话 B" ownNumber={MINE_NUM.B} otherNumber={PEER_NUM.B}
         badgeLevel={3} smsList={smsLog} onSendSms={sendSms} voice={voiceFace}
-        group={{ list: groupList, current: currentGroup, msgs: groupMsgLog, onLoadList: loadGroupList, onCreate: createGroup, onOpen: (gid) => { setCurrentGroup(null); setGroupMsgLog([]); return openGroup(gid) }, onSend: sendGroup, onBack: () => { setCurrentGroup(null); setGroupMsgLog([]) } }} onReport={reportUsage} theme={themeOf('B')} unlocked={unlocked} onUnlock={onUnlock} onSelectTheme={(n) => onSelectTheme('B', n)} top={topPanel === 'B'} onFocus={() => setTopPanel('B')} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} pos={pos.B} onDragStart={(e) => startDrag('B', e)} justDragged={justDragged} />
+        group={{ list: groupList, current: currentGroup, msgs: groupMsgLog, onLoadList: loadGroupList, onCreate: createGroup, onOpen: (gid) => { setCurrentGroup(null); setGroupMsgLog([]); return openGroup(gid) }, onSend: sendGroup, onLeave: leaveGroup, onDisband: disbandGroup, onAnnouncement: setAnnouncement, onBack: () => { setCurrentGroup(null); setGroupMsgLog([]) } }} onReport={reportUsage} theme={themeOf('B')} unlocked={unlocked} onUnlock={onUnlock} onSelectTheme={(n) => onSelectTheme('B', n)} top={topPanel === 'B'} onFocus={() => setTopPanel('B')} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} pos={pos.B} onDragStart={(e) => startDrag('B', e)} justDragged={justDragged} />
     </>
   )
 }

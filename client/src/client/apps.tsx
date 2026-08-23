@@ -32,8 +32,8 @@ export interface AppData {
   smsList: Array<any>
   /** RCS 群（列表 + 当前群 + 消息） */
   group: {
-    list: Array<{ groupId: string; name: string; memberCount: number }>
-    current: { groupId: string; name: string; members: string[] } | null
+    list: Array<{ groupId: string; name: string; memberCount: number; lastMsgSeq?: number; announcement?: string }>
+    current: { groupId: string; name: string; members: string[]; createdBy?: string; conversationId?: string; announcement?: string } | null
     msgs: Array<{ fromNumber: string; text: string; ts: number }>
   }
   /** 通讯录 / 开户 / 用量 */
@@ -52,13 +52,16 @@ export interface AppData {
 export interface AppActions {
   nav(v: string): void
   back(): void
-  sendSms(fromId: 'A' | 'B', text?: string, attachment?: any): void
-  sendGroup(from: string, text: string): Promise<{ delivered: string[]; failed: string[] }> | void
+  sendSms(fromId: 'A' | 'B', text?: string, attachment?: any, to?: string): void
+  sendGroup(from: string, text: string): Promise<{ delivered: string[]; failed: string[]; error?: string }> | void
   loadContacts(): void
   loadAccount(): void
   loadUsage(): void
   loadGroupList(): void
   openGroup(groupId: string): Promise<void> | void
+  leaveGroup(groupId: string, member: string): Promise<{ ok: boolean; error?: string }>
+  disbandGroup(groupId: string): Promise<{ ok: boolean; error?: string }>
+  setAnnouncement(groupId: string, text: string): Promise<{ ok: boolean; error?: string }>
   createGroup(name: string, members: string[]): Promise<{ gid: string | null; error: string }>
   groupBack(): void
   applyAccount(displayName?: string): void

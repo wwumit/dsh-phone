@@ -40,6 +40,11 @@ const client: UserConfig = {
     'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV ?? 'production'),
     'import.meta.env.MODE': JSON.stringify(process.env.NODE_ENV ?? 'production'),
     'import.meta.env': JSON.stringify({ MODE: process.env.NODE_ENV ?? 'production' }),
+    // dsh-phone 环境变量（构建时注入；缺省空串 → config.ts 回退缺省值，行为不变）
+    'process.env.DSH_PHONE_BASE': JSON.stringify(process.env.DSH_PHONE_BASE ?? ''),
+    'process.env.DSH_PHONE_DID': JSON.stringify(process.env.DSH_PHONE_DID ?? ''),
+    'process.env.DSH_PHONE_NUM_A': JSON.stringify(process.env.DSH_PHONE_NUM_A ?? ''),
+    'process.env.DSH_PHONE_NUM_B': JSON.stringify(process.env.DSH_PHONE_NUM_B ?? ''),
   },
   outputOptions: {
     entryFileNames: 'client.js',

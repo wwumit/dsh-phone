@@ -7,20 +7,33 @@
  * 来源标记；node 半解析最近一个来源标记，把后续 assistant 回复按来源路由回去。
  */
 import type { Context } from '@deepseek-ai/cordis'
+import fs from 'fs'
+import path from 'path'
 
 export const name = 'dsh-phone'
-export const inject = ['sessionQuery']
+export const inject = ['sessionQuery', 'webServer']
 
-const PHONE_BASE = 'https://compliancehub.cn'
-const AGENT_DID = 'did:cha2a:agent:dshlib'
-const REPLY_INTERVAL = 8000          // 轮询间隔
+const PHONE_BASE = process.env.DSH_PHONE_BASE || 'https://compliancehub.cn'
+const AGENT_DID = process.env.DSH_PHONE_DID || 'did:cha2a:agent:dshlib'
+const AGENT_SHORT = AGENT_DID.split(':').pop() || 'dshlib'
+const REPLY_INTERVAL = 2500          // 轮询间隔（回复路由时延大头，2.5s）
 const SEEN_MAX = 200                 // 已处理消息去重上限
+// 轮询游标持久化：重启后不重放历史回复（游标按 sid 记录已处理消息数；inbox 记录收件箱 seq）
+const CURSOR_FILE = path.join(process.env.DSH_HOME || '/tmp', 'dsh-phone-cursor.json')
+const INBOX_KEY = 'inbox'           // 收件箱消费者游标键（跨设备投递）
+
+function loadCursor(): Record<string, number> {
+  try { return JSON.parse(fs.readFileSync(CURSOR_FILE, 'utf8')) } catch { return {} }
+}
+function saveCursor(c: Record<string, number>): void {
+  try { fs.writeFileSync(CURSOR_FILE, JSON.stringify(c)) } catch { /* 写失败忽略 */ }
+}
 
 export function apply(ctx: Context): void {
 
   // ── Agent 回复转回：读绑定会话最新 assistant 消息 → 按来源路由回电话 ──
   const seen = new Set<string>()
-  let lastChecked: Record<string, number> = {}
+  let lastChecked: Record<string, number> = loadCursor()
 
   // 解析 <dsh-phone>{json}</dsh-phone> 来源标记（返回 null 表示无标记）
   function parseSource(text: string): { source: string; fromNumber: string; conversationId?: string; groupId?: string } | null {
@@ -55,12 +68,12 @@ export function apply(ctx: Context): void {
       const loc = await (await fetch(`${PHONE_BASE}/api/v1/agent/locate?did=${encodeURIComponent(AGENT_DID)}`, {
         headers: { Accept: 'application/json' },
       })).json()
-      if (!loc || !loc.bound || !loc.sessionId) return
+      if (!loc || !loc.bound || !loc.sessionId) { console.log('[dsh-phone] poll: 无绑定会话'); return }
       const sid = loc.sessionId
 
       // 2. 读会话消息序列（含 user 来源标记 + assistant 回复）
       const session = await (ctx as any).sessionQuery?.readSession?.(sid)
-      if (!session) return
+      if (!session) { console.log('[dsh-phone] poll: readSession 失败', sid); return }
       const events = (session as any).events || []
       const msgs = extractMessages(events)
 
@@ -69,6 +82,7 @@ export function apply(ctx: Context): void {
 
       // 3. 追踪最近来源标记：遍历消息，记住每个 user 标记；assistant 回复按最近标记路由
       let currentSource: { source: string; fromNumber: string; groupId?: string; conversationId?: string } | null = null
+      let routed = 0
       for (let i = 0; i < msgs.length; i++) {
         const msg = msgs[i]
         // user 消息：解析来源标记并更新当前来源
@@ -83,9 +97,8 @@ export function apply(ctx: Context): void {
         if (!msg.role.includes('assistant')) continue
         if (i < seenCount) continue          // 已处理过
         const text = msg.text
-        if (text.length < 4 || text.length > 2000) continue
-        // 过滤思考过程/转述
-        if (/^[\[（(]?think/i.test(text) || /转述|relay|simulated|appears to be|let me think|I'll|I will/i.test(text)) continue
+        if (!text.trim() || text.length > 2000) continue
+        // 不做内容过滤：extractText 已跳过 reasoning 块，text 块即 AI 最终回答（自由模式下不再误杀）
         const key = sid + ':' + i + ':' + text.slice(0, 50)
         if (seen.has(key)) continue
         seen.add(key)
@@ -95,26 +108,105 @@ export function apply(ctx: Context): void {
         const src = currentSource || { source: 'sms', fromNumber: '+86 95123 0001' }
 
         if (src.source === 'sms') {
-          // 回短信：agent 侧号码 0002 → 原发信号码（to 规范化 E.164 无空格）
+          // 回短信：agent 身份发回（fromNumber=AGENT_DID 代表 agent，任何电话面板判"收到"左侧）；to 规范化 E.164
           const toNum = src.fromNumber.replace(/[^0-9+]/g, '')
           fetch(`${PHONE_BASE}/api/v1/phone/message`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ from: AGENT_DID, fromNumber: '+86 95123 0002', to: toNum, text: `[agent回复] ${text}` }),
+            body: JSON.stringify({ from: AGENT_DID, fromNumber: AGENT_DID, to: toNum, text: `[agent回复] ${text}` }),
           }).catch(() => {})
+          routed++
         } else if (src.source === 'group' && src.groupId) {
           // 回群广播（来源=group）：agent 回复广播回群；带 conversationId 保持群级会话语义
           fetch(`${PHONE_BASE}/api/v1/phone/group/message`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ from: AGENT_DID, fromNumber: '+86 95123 0002', groupId: src.groupId, ...(src.conversationId ? { conversationId: src.conversationId } : {}), text: `[agent回复] ${text}` }),
+            body: JSON.stringify({ from: AGENT_DID, fromNumber: AGENT_DID, groupId: src.groupId, ...(src.conversationId ? { conversationId: src.conversationId } : {}), text: `[agent回复] ${text}` }),
           }).catch(() => {})
+          routed++
         }
       }
       lastChecked[sid] = msgs.length
-    } catch { /* 静默，下轮重试 */ }
+      saveCursor(lastChecked)
+      if (routed > 0) console.log(`[dsh-phone] poll: 路由 ${routed} 条回复（sid=${sid.slice(0, 8)} msgs=${msgs.length}）`)
+    } catch (e) { console.log('[dsh-phone] poll err:', String(e).slice(0, 120)) }
   }
 
-  const timer = setInterval(pollAgentReplies, REPLY_INTERVAL)
-  setTimeout(pollAgentReplies, 5000)   // 首轮延迟（等绑定建立）
+  // ── 收件箱消费者（跨设备投递桥）：轮询 registry 收件箱（自己的 DID）→ 新消息注入本实例会话 → AI 回复
+  // 投递与实例解耦：任何实例 @ 本 agent，消息进收件箱，由本实例 node 半处理
+  let ownNickname = ''
+  async function refreshNickname(): Promise<void> {
+    try {
+      const d = await (await fetch(`${PHONE_BASE}/api/v1/did/${AGENT_DID}`, { headers: { Accept: 'application/json' } })).json()
+      ownNickname = (d?.metadata?.name) || (d?.metadata?.author) || ''
+    } catch { /* 静默 */ }
+  }
+  // 群消息是否 @ 自己（短名 或 昵称）
+  function isMentionedMe(text: string): boolean {
+    if (!text) return false
+    if (text.includes(`@${AGENT_SHORT}`)) return true
+    if (ownNickname && text.includes(`@${ownNickname}`)) return true
+    return false
+  }
+  // 注入会话（session.prompt RPC，loopback 信任通过）：触发 AI 生成回复
+  async function promptSession(sid: string, promptText: string): Promise<boolean> {
+    try {
+      const port = (ctx as any).webServer?.port || 8099
+      const body = {
+        type: 'client-request',
+        rpcId: `dsh-phone-${Date.now().toString(36)}`,
+        method: 'session.prompt',
+        payload: { sessionId: sid, content: [{ type: 'text', text: promptText }], mode: 'queue' },
+      }
+      const r = await fetch(`http://127.0.0.1:${port}/api/session.prompt`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      }).catch(() => null)
+      if (!r) return false
+      const d = await r.json().catch(() => null)
+      return !!(d && d.result && d.result.ok)
+    } catch { return false }
+  }
+  async function pollInbox(): Promise<void> {
+    try {
+      const loc = await (await fetch(`${PHONE_BASE}/api/v1/agent/locate?did=${encodeURIComponent(AGENT_DID)}`, {
+        headers: { Accept: 'application/json' },
+      })).json()
+      if (!loc || !loc.bound || !loc.sessionId) return   // 无绑定会话则无法注入
+      const sid = loc.sessionId
+      const base = lastChecked[INBOX_KEY] || 0
+      const d = await (await fetch(`${PHONE_BASE}/api/v1/phone/messages?did=${encodeURIComponent(AGENT_DID)}&since=${base}`, {
+        headers: { Accept: 'application/json' }, cache: 'no-store',
+      })).json()
+      const msgs = (d.messages || []) as any[]
+      let injected = 0
+      for (const m of msgs) {
+        if (m.signal) continue                          // 语音信令走前端
+        if (m.from === AGENT_DID) continue              // 自己发出的（本实例前端已注入快路径，防重复）
+        if ((m.seq || 0) <= base) continue
+        const text = String(m.text || '')
+        if (!text.trim()) continue
+        if (m.groupId) {
+          // 群消息：只处理 @ 自己的（被点名才回复，防刷屏）
+          if (!isMentionedMe(text)) continue
+        }
+        // 构造 srcTag（来源即目的地）+ prompt（自由回答，与前端投递同模板）
+        const fromNumber = String(m.fromNumber || '')
+        const srcTag = m.groupId
+          ? `<dsh-phone>{"source":"group","fromNumber":"${fromNumber}","conversationId":"${m.conversationId || ''}","groupId":"${m.groupId}"}</dsh-phone>`
+          : `<dsh-phone>{"source":"sms","fromNumber":"${fromNumber}"}</dsh-phone>`
+        const prompt = m.groupId
+          ? `${srcTag} [群聊消息] ${fromNumber} 在群里发来消息，请直接回复（回复会原样发回群里）。消息：${text}`
+          : `${srcTag} [电话短信] 号码 ${fromNumber} 发来短信，请直接回复（你的回复会原样回给该号码）。短信内容：${text}`
+        const ok = await promptSession(sid, prompt)
+        if (ok) injected++
+        // 无论注入成败都推进游标（避免死循环重试同一条）
+        lastChecked[INBOX_KEY] = Math.max(lastChecked[INBOX_KEY] || 0, m.seq || 0)
+      }
+      saveCursor(lastChecked)
+      if (injected > 0) console.log(`[dsh-phone] inbox: 注入 ${injected} 条（sid=${sid.slice(0, 8)}）`)
+    } catch (e) { console.log('[dsh-phone] inbox err:', String(e).slice(0, 120)) }
+  }
+
+  const timer = setInterval(() => { pollAgentReplies(); pollInbox() }, REPLY_INTERVAL)
+  setTimeout(() => { pollAgentReplies(); pollInbox(); refreshNickname() }, 5000)   // 首轮延迟（等绑定建立）
   ctx.on('dispose', () => clearInterval(timer))
 }
 
@@ -122,7 +214,11 @@ function extractText(m: any): string {
   const c = m?.content
   if (typeof c === 'string') return c.trim()
   if (Array.isArray(c)) {
-    return c.map((x: any) => (typeof x === 'string' ? x : x?.text || '')).join(' ').trim()
+    // DSH assistant 消息 content 是块数组（reasoning + text）；只取 text 块，跳过 reasoning（否则拼入思考过程触发过滤误杀）
+    return c
+      .filter((x: any) => typeof x === 'string' || (x && x.type !== 'reasoning'))
+      .map((x: any) => (typeof x === 'string' ? x : x?.text || ''))
+      .join(' ').trim()
   }
   if (c && typeof c === 'object') return String(c.text || '')
   return ''
