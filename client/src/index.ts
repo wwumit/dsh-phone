@@ -68,8 +68,9 @@ export function apply(ctx: Context): void {
       const loc = await (await fetch(`${PHONE_BASE}/api/v1/agent/locate?did=${encodeURIComponent(AGENT_DID)}`, {
         headers: { Accept: 'application/json' },
       })).json()
-      if (!loc || !loc.bound || !loc.sessionId) { console.log('[dsh-phone] poll: 无绑定会话'); return }
-      const sid = loc.sessionId
+      if (!loc || !loc.bound) { console.log('[dsh-phone] poll: 无绑定会话'); return }
+      const sid = await resolveSession(loc)
+      if (!sid) { console.log('[dsh-phone] poll: 无有效会话（主+alternatives 均失效）'); return }
 
       // 2. 读会话消息序列（含 user 来源标记 + assistant 回复）
       const session = await (ctx as any).sessionQuery?.readSession?.(sid)
@@ -143,6 +144,18 @@ export function apply(ctx: Context): void {
       ownLevel = Number(t?.level ?? t?.trust?.level) || 0
     } catch { /* 静默 */ }
   }
+  // 解析有效会话：主会话可能已过期（重启后 session id 变），主失败则遍历 alternatives
+  async function resolveSession(loc: any): Promise<string | null> {
+    if (!loc || !loc.bound) return null
+    const candidates = [loc.sessionId, ...((loc.alternatives || []).map((a: any) => a.sessionId))].filter(Boolean)
+    for (const sid of candidates) {
+      try {
+        const s = await (ctx as any).sessionQuery?.readSession?.(sid)
+        if (s) return sid
+      } catch { /* 该候选失效，试下一个 */ }
+    }
+    return null
+  }
   // 群消息是否 @ 自己（短名 或 昵称）
   function isMentionedMe(text: string): boolean {
     if (!text) return false
@@ -173,8 +186,9 @@ export function apply(ctx: Context): void {
       const loc = await (await fetch(`${PHONE_BASE}/api/v1/agent/locate?did=${encodeURIComponent(AGENT_DID)}`, {
         headers: { Accept: 'application/json' },
       })).json()
-      if (!loc || !loc.bound || !loc.sessionId) return   // 无绑定会话则无法注入
-      const sid = loc.sessionId
+      if (!loc || !loc.bound) return   // 无绑定会话则无法注入
+      const sid = await resolveSession(loc)
+      if (!sid) return   // 主+alternatives 均失效
       const base = lastChecked[INBOX_KEY] || 0
       const d = await (await fetch(`${PHONE_BASE}/api/v1/phone/messages?did=${encodeURIComponent(AGENT_DID)}&since=${base}`, {
         headers: { Accept: 'application/json' }, cache: 'no-store',
