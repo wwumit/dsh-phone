@@ -546,6 +546,8 @@ function PhoneOverlay(): JSX.Element {
     }
     // @agent 投递：所有 @ 到的 agent 成员都投递（@人仅提及，不投递）；内容 = 整条消息
     for (const mentioned of mentions) {
+      // 跳过 @ 自己（自己的短名）——sendSmsToAgent 已挡，这里避免进 delivered 列表
+      if (mentioned === AGENT_DID.replace(/^did:cha2a:agent:/, '')) continue
       const isAgentMember = (currentGroup.members || []).some((mm) => mm === `did:cha2a:agent:${mentioned}`)
       if (isAgentMember) {
         const ok = await sendSmsToAgent(mentioned, text, from === 'A' ? '+86 95123 0001' : '+86 95123 0002', 'group', currentGroup.groupId, currentGroup.conversationId)
@@ -653,6 +655,9 @@ function PhoneOverlay(): JSX.Element {
   // source: 'sms'（回短信）| 'group'（回群广播）；groupId 群聊时带；groupConvId 群级会话 id（RCS 持续会话）
   async function sendSmsToAgent(agentName: string, content: string, fromNumber: string, source: 'sms' | 'group' = 'sms', groupId?: string, groupConvId?: string): Promise<boolean> {
     const agentDid = `did:cha2a:agent:${agentName}`
+    // 排除投递给自己：@ 自己的短名/完整 DID → 不投递（否则自己收到自己发的消息，火山 A 案例）
+    const myShort = AGENT_DID.replace(/^did:cha2a:agent:/, '')
+    if (agentDid === AGENT_DID || agentName === myShort) return true
     try {
       const loc = await (await fetch(`${PHONE_BASE}/api/v1/agent/locate?did=${encodeURIComponent(agentDid)}`, { headers: { Accept: 'application/json' } })).json()
       if (loc && loc.bound && loc.sessionId) {
