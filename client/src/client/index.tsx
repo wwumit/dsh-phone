@@ -471,7 +471,7 @@ function PhoneOverlay(): JSX.Element {
   const [groupMsgs, setGroupMsgs] = useState<Array<{ from: string; text: string; ts: number }>>([])
   const [groupList, setGroupList] = useState<Array<{ groupId: string; name: string; memberCount: number }>>([])
   const [currentGroup, setCurrentGroup] = useState<{ groupId: string; name: string; members: string[]; conversationId?: string; createdBy?: string } | null>(null)
-  const [groupMsgLog, setGroupMsgLog] = useState<Array<{ fromNumber: string; text: string; ts: number }>>([])
+  const [groupMsgLog, setGroupMsgLog] = useState<Array<{ fromNumber: string; text: string; ts: number; agent?: { did: string; name: string; level: number }; kind?: string; payload?: any; status?: string; seq?: number }>>([])
   const groupLastSeq = useRef<Record<string, number>>({})
 
   // 群列表加载（我是成员/创建者）
@@ -513,7 +513,7 @@ function PhoneOverlay(): JSX.Element {
         const gm = (d.messages || []).filter((m: any) => m.groupId === groupId)
         if (gm.length) {
           groupLastSeq.current[groupId] = Math.max(...gm.map((m: any) => m.seq || 0), groupLastSeq.current[groupId] || 0)
-          const mapped = gm.map((m: any) => ({ fromNumber: m.fromNumber || '对端', text: m.text || '', ts: Date.parse(m.at) || Date.now() }))
+          const mapped = gm.map((m: any) => ({ fromNumber: m.fromNumber || '对端', text: m.text || '', ts: Date.parse(m.at) || Date.now(), ...(m.agent ? { agent: m.agent } : {}), ...(m.kind ? { kind: m.kind } : {}), ...(m.payload ? { payload: m.payload } : {}), ...(m.status ? { status: m.status } : {}), seq: m.seq }))
           // force（打开群）：全量替换（防与轮询竞争重复）；增量：追加
           if (force) setGroupMsgLog(mapped)
           else setGroupMsgLog((l) => [...l, ...mapped])
@@ -726,7 +726,7 @@ function PhoneOverlay(): JSX.Element {
             const gm = d.messages.filter((m: any) => m.groupId === gid && (m.seq || 0) > base)
             if (gm.length) {
               groupLastSeq.current[gid] = Math.max(...gm.map((m: any) => m.seq || 0), base)
-              setGroupMsgLog((l) => [...l, ...gm.map((m: any) => ({ fromNumber: m.fromNumber || '对端', text: m.text || '', ts: Date.parse(m.at) || Date.now() }))])
+              setGroupMsgLog((l) => [...l, ...gm.map((m: any) => ({ fromNumber: m.fromNumber || '对端', text: m.text || '', ts: Date.parse(m.at) || Date.now(), ...(m.agent ? { agent: m.agent } : {}), ...(m.kind ? { kind: m.kind } : {}), ...(m.payload ? { payload: m.payload } : {}), ...(m.status ? { status: m.status } : {}), seq: m.seq }))])
             }
           }
           // 信令消息（语音 offer/answer/candidate）→ 处理

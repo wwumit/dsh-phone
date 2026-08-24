@@ -127,7 +127,7 @@ export function GroupChatApp(p: AppProps): JSX.Element {
     const last = data.group.msgs[data.group.msgs.length - 1]
     if (last && (last.text || '').startsWith('[agent回复]')) setSendNote('')
   }, [data.group.msgs.length])
-  const [nickMap, setNickMap] = useState<Record<string, { nickname: string; type: 'phone' | 'agent'; level: number }>>({})
+  const [nickMap, setNickMap] = useState<Record<string, { nickname: string; type: 'phone' | 'agent'; level: number; capabilities?: string[] }>>({})
   const cur = data.group.current
   if (!cur) return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.muted, fontSize: 12 }}>群不存在</div>
   // 消息列表自动滚动到底部（新消息进来 / 打开群时）
@@ -142,8 +142,8 @@ export function GroupChatApp(p: AppProps): JSX.Element {
       .then((r) => r.json())
       .then((d) => {
         if (d && d.members) {
-          const m: Record<string, { nickname: string; type: 'phone' | 'agent'; level: number }> = {}
-          d.members.forEach((x: any) => { m[x.member] = { nickname: x.nickname, type: x.type, level: x.level } })
+          const m: Record<string, { nickname: string; type: 'phone' | 'agent'; level: number; capabilities?: string[] }> = {}
+          d.members.forEach((x: any) => { m[x.member] = { nickname: x.nickname, type: x.type, level: x.level, ...(x.capabilities ? { capabilities: x.capabilities } : {}) } })
           setNickMap(m)
         }
       })
@@ -177,7 +177,8 @@ export function GroupChatApp(p: AppProps): JSX.Element {
     .map((m) => {
       if (m.startsWith('did:cha2a:agent:')) {
         const nick = nickMap[m]?.nickname || m.split(':').pop()!
-        return { key: m, label: nick, match: nick, isAgent: true }
+        const caps = nickMap[m]?.capabilities || []
+        return { key: m, label: nick, match: nick + ' ' + caps.join(' '), isAgent: true, caps }
       }
       const nick = nickMap[m]?.nickname || m
       return { key: m, label: nick, match: m.replace(/[^0-9+]/g, ''), isAgent: false }
@@ -250,20 +251,41 @@ export function GroupChatApp(p: AppProps): JSX.Element {
             const norm = (s: string) => String(s || '').replace(/[^0-9+]/g, '')
             const mine = !!m.fromNumber && (norm(m.fromNumber) === norm(data.ownNumber) || m.fromNumber === AGENT_DID)
             const sn = senderName(m.fromNumber || '')
+            // v2 多 agent：优先用消息自带 agent 字段（node 半回复归属），回退成员映射
+            const agentInfo = m.agent || (sn.type === 'agent' ? { did: '', name: sn.name, level: sn.level } : null)
+            const recalled = m.status === 'recalled'
+            const isCard = m.kind === 'card'
             return (
               <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: mine ? 'flex-end' : 'flex-start', marginBottom: 8 }}>
-                <div style={{ fontSize: 9, color: sn.type === 'agent' ? '#ffd60a' : '#8e8e93', marginBottom: 2, padding: '0 2px', display: 'flex', alignItems: 'center', gap: 4 }}>
-                  {mine ? '我' : sn.name}
-                  {sn.type === 'agent' && <img src={`${PHONE_BASE}/store/assets/l${sn.level}.png`} alt={`L${sn.level}`} style={{ height: 11 }} />}
-                  {sn.type === 'agent' ? ' 🤖' : ''}
+                <div style={{ fontSize: 9, color: agentInfo ? '#ffd60a' : '#8e8e93', marginBottom: 2, padding: '0 2px', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  {mine ? '我' : (agentInfo ? (agentInfo.name || sn.name) : sn.name)}
+                  {agentInfo && <img src={`${PHONE_BASE}/store/assets/l${agentInfo.level || sn.level}.png`} alt={`L${agentInfo.level || sn.level}`} style={{ height: 11 }} />}
+                  {agentInfo ? ' 🤖' : ''}
                 </div>
                 <div style={{ maxWidth: '82%', padding: '6px 11px', borderRadius: 12,
-                  background: mine ? t.msgMine : t.msgOther, color: t.text, fontSize: 12,
-                  borderTopRightRadius: mine ? 3 : 12, borderTopLeftRadius: mine ? 12 : 3 }}>
-                  {renderText(m.text || '')}
+                  background: mine ? t.msgMine : t.msgOther, color: recalled ? t.muted : t.text, fontSize: 12,
+                  borderTopRightRadius: mine ? 3 : 12, borderTopLeftRadius: mine ? 12 : 3,
+                  ...(recalled ? { fontStyle: 'italic' } : {}) }}>
+                  {recalled ? '（已撤回）' : isCard && m.payload
+                    ? (
+                      <div>
+                        {m.payload.title && <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{m.payload.title}</div>}
+                        {(m.payload.fields || []).map((f: any, j: number) => (
+                          <div key={j} style={{ fontSize: 11, marginBottom: 2, display: 'flex', gap: 6 }}>
+                            {f.k && <span style={{ color: t.sub }}>{f.k}:</span>}
+                            <span>{f.v}</span>
+                          </div>
+                        ))}
+                        {(m.payload.actions || []).map((a: any, j: number) => (
+                          <button key={j} onClick={() => a.url && window.open(a.url, '_blank')}
+                            style={{ marginTop: 6, marginRight: 6, background: t.accent, color: '#fff', border: 0, borderRadius: 6, padding: '3px 10px', fontSize: 11, cursor: 'pointer' }}>{a.label}</button>
+                        ))}
+                      </div>
+                    )
+                    : renderText(m.text || '')}
                 </div>
                 <div style={{ fontSize: 8, color: t.muted, marginTop: 2, padding: '0 2px' }}>
-                  {m.ts ? new Date(m.ts).toTimeString().slice(0, 5) : ''}
+                  {m.ts ? new Date(m.ts).toTimeString().slice(0, 5) : ''}{m.status === 'recalled' ? ' · 已撤回' : ''}
                 </div>
               </div>
             )
@@ -281,7 +303,14 @@ export function GroupChatApp(p: AppProps): JSX.Element {
                 {c.isAgent
                   ? <span style={{ fontSize: 11, color: '#ffd60a', border: '1px solid #ffd60a', borderRadius: 5, padding: '1px 5px', flexShrink: 0, background: 'rgba(255,214,10,.08)' }}>🤖 agent</span>
                   : <span style={{ fontSize: 11, color: '#5ac8fa', border: '1px solid #5ac8fa', borderRadius: 5, padding: '1px 5px', flexShrink: 0, background: 'rgba(90,200,250,.08)' }}>📞 电话</span>}
-                <span style={{ fontSize: 12, color: '#fff' }}>{c.isAgent ? c.label : c.label.replace(/^\+86 95123 0+/, '')}</span>
+                <span style={{ fontSize: 12, color: '#fff', flex: 1 }}>{c.isAgent ? c.label : c.label.replace(/^\+86 95123 0+/, '')}</span>
+                {(c as any).caps && (c as any).caps.length > 0 && (
+                  <span style={{ fontSize: 9, color: t.sub, display: 'flex', gap: 3 }}>
+                    {(c as any).caps.slice(0, 3).map((cap: string, j: number) => (
+                      <span key={j} style={{ background: 'rgba(255,255,255,.08)', borderRadius: 4, padding: '1px 5px' }}>{cap}</span>
+                    ))}
+                  </span>
+                )}
               </button>
             ))}
         </div>
@@ -310,7 +339,7 @@ export function GroupChatApp(p: AppProps): JSX.Element {
 export function GroupInfoApp(p: AppProps): JSX.Element {
   const { t, data, actions, nav, back } = p
   const cur = data.group.current
-  const [nickMap, setNickMap] = useState<Record<string, { nickname: string; type: 'phone' | 'agent'; level: number }>>({})
+  const [nickMap, setNickMap] = useState<Record<string, { nickname: string; type: 'phone' | 'agent'; level: number; capabilities?: string[] }>>({})
   const [addMode, setAddMode] = useState(false)
   const [addPick, setAddPick] = useState<string[]>([])
   const [msg, setMsg] = useState('')

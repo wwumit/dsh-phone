@@ -34,7 +34,7 @@ export interface AppData {
   group: {
     list: Array<{ groupId: string; name: string; memberCount: number; lastMsgSeq?: number; announcement?: string }>
     current: { groupId: string; name: string; members: string[]; createdBy?: string; conversationId?: string; announcement?: string } | null
-    msgs: Array<{ fromNumber: string; text: string; ts: number }>
+    msgs: Array<{ fromNumber: string; text: string; ts: number; agent?: { did: string; name: string; level: number }; kind?: string; payload?: any; status?: string; seq?: number }>
   }
   /** 通讯录 / 开户 / 用量 */
   contacts: Array<{ number: string; agentDid: string; displayName: string | null; level: number }> | null
