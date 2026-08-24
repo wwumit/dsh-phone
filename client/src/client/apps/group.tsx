@@ -6,7 +6,7 @@
 import React, { useState } from 'react'
 import { type AppProps } from '../apps'
 import { AppBar } from '../theme'
-import { PHONE_BASE } from '../config'
+import { PHONE_BASE, AGENT_DID } from '../config'
 
 // 群已读游标（localStorage：groupId → 已读 seq；未读数 = lastMsgSeq - readSeq）
 const READ_KEY = 'dsh-phone-group-read'
@@ -246,7 +246,9 @@ export function GroupChatApp(p: AppProps): JSX.Element {
         {data.group.msgs.length === 0
           ? <div style={{ fontSize: 12, color: t.muted }}>群消息为空（发 @agent 可与智能体协作）</div>
           : data.group.msgs.map((m, i) => {
-            const mine = m.fromNumber && m.fromNumber.replace(/[^0-9+]/g, '') === data.ownNumber.replace(/[^0-9+]/g, '')
+            // "自己" = 本面板号码 或 本面板绑定的 agent（node 半回复带 AGENT_DID，算我方发言靠右）
+            const norm = (s: string) => String(s || '').replace(/[^0-9+]/g, '')
+            const mine = !!m.fromNumber && (norm(m.fromNumber) === norm(data.ownNumber) || m.fromNumber === AGENT_DID)
             const sn = senderName(m.fromNumber || '')
             return (
               <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: mine ? 'flex-end' : 'flex-start', marginBottom: 8 }}>

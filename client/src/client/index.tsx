@@ -207,7 +207,7 @@ function PhonePanel(props: {
   const [contacts, setContacts] = useState<Array<{ number: string; agentDid: string; displayName: string | null; level: number }> | null>(null)
   const [contactsErr, setContactsErr] = useState('')
   const [usage, setUsage] = useState<any>(null)
-  const [account, setAccount] = useState<{ numbers: string[]; applying: boolean; done: string | null; err: string; credits: number; welcome: number }>({ numbers: [], applying: false, done: null, err: '', credits: 0, welcome: 0 })
+  const [account, setAccount] = useState<{ numbers: string[]; applying: boolean; done: string | null; err: string; credits: number; welcome: number; agentState: string; agentLevel: number; agentLevelName: string; registering: boolean }>({ numbers: [], applying: false, done: null, err: '', credits: 0, welcome: 0, agentState: 'unknown', agentLevel: 0, agentLevelName: '', registering: false })
 
   // 来电强制唤起本面板
   const incoming = props.call && props.call.calleeId === props.id
@@ -225,6 +225,49 @@ function PhonePanel(props: {
     }
   }
 
+  /** 检测当前 AGENT_DID 是否已注册 + 等级（开户引导第一步） */
+  function checkAgentRegistered(): void {
+    fetch(`${PHONE_BASE}/api/v1/did/${encodeURIComponent(AGENT_DID)}`, { headers: { Accept: 'application/json' } })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d && d.did) {
+          const lvl = d.level ?? 0
+          setAccount((a) => ({ ...a, agentState: 'registered', agentLevel: lvl, agentLevelName: d.levelName || `L${lvl}`, err: '' }))
+        } else {
+          setAccount((a) => ({ ...a, agentState: 'unregistered', agentLevel: 0, agentLevelName: '', err: '' }))
+        }
+      })
+      .catch(() => setAccount((a) => ({ ...a, agentState: 'unregistered', err: '无法确认 agent 状态' })))
+  }
+
+  /** 注册 agent（名字 + author → L 等级；author 决定能否过信任门禁） */
+  async function registerAgent(displayName: string, author: string): Promise<void> {
+    setAccount((a) => ({ ...a, registering: true, err: '' }))
+    try {
+      // 1. 注册身份主体
+      const r1 = await fetch(`${PHONE_BASE}/api/v1/register`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'agent', id: AGENT_DID.replace(/^did:cha2a:agent:/, ''), metadata: { name: displayName, author } }),
+      })
+      const d1 = await r1.json()
+      if (r1.status !== 201) {
+        // 已存在则尝试补 metadata（升级 author → L2）
+        if (r1.status === 409 && author) {
+          await fetch(`${PHONE_BASE}/api/v1/update`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'agent', id: AGENT_DID.replace(/^did:cha2a:agent:/, ''), metadata: { author } }),
+          })
+        } else {
+          setAccount((a) => ({ ...a, registering: false, err: d1.error || 'agent 注册失败' }))
+          return
+        }
+      }
+      // 2. 重新确认状态
+      checkAgentRegistered()
+      setAccount((a) => ({ ...a, registering: false, done: AGENT_DID }))
+    } catch { setAccount((a) => ({ ...a, registering: false, err: '网络错误' })) }
+  }
+
   function loadAccount(): void {
     fetch(`${PHONE_BASE}/api/v1/phone/lookup?did=${encodeURIComponent(AGENT_DID)}`, { headers: { Accept: 'application/json' } })
       .then((r) => r.json())
@@ -234,6 +277,7 @@ function PhonePanel(props: {
       .then((r) => r.json())
       .then((d) => { setAccount((a) => ({ ...a, credits: d.credits || 0 })) })
       .catch(() => {})
+    checkAgentRegistered()
   }
   async function applyAccount(displayName = ''): Promise<void> {
     setAccount((a) => ({ ...a, applying: true, err: '' }))
@@ -245,6 +289,9 @@ function PhonePanel(props: {
       const d = await r.json()
       if (r.status === 201) {
         setAccount((a) => ({ ...a, numbers: [...a.numbers, d.number], done: d.number, welcome: d.welcomeCredits || 0, credits: (a.credits || 0) + (d.welcomeCredits || 0), applying: false }))
+      } else if (r.status === 409 && /agent not registered/i.test(d.error || '')) {
+        // 未注册 agent → 转引导注册（不报硬错误）
+        setAccount((a) => ({ ...a, applying: false, agentState: 'unregistered', err: '请先注册你的 agent（下方第 1 步）' }))
       } else {
         setAccount((a) => ({ ...a, err: d.error || '申请失败', applying: false }))
       }
@@ -309,6 +356,8 @@ function PhonePanel(props: {
     createGroup: (name, members) => props.group.onCreate(name, members),
     groupBack: () => props.group.onBack(),
     applyAccount,
+    registerAgent,
+    checkAgentRegistered,
     dial: (fromId, num) => props.onDial(fromId, num),
     answer: () => props.onAnswer(),
     hangup,
@@ -590,7 +639,15 @@ function PhoneOverlay(): JSX.Element {
     window.addEventListener('pointerup', onUp)
   }
 
-  const [lastSeq, setLastSeq] = useState(0)
+  // 收件箱游标持久化（localStorage，按 DID 隔离）：刷新后不重放历史消息/信令
+  // （否则持久化的 signal offer 会在刷新后重新触发振铃——bug 修复）
+  const SEQ_KEY = 'dsh-phone-seq-' + AGENT_DID.replace(/[^A-Za-z0-9]/g, '')
+  const [lastSeq, setLastSeq] = useState(() => {
+    try { return parseInt(localStorage.getItem(SEQ_KEY) || '0', 10) || 0 } catch { return 0 }
+  })
+  function bumpSeq(seq: number): void {
+    if (seq > lastSeq) { setLastSeq(seq); try { localStorage.setItem(SEQ_KEY, String(seq)) } catch {} }
+  }
 
   // @agent 投递（短信和群聊共用）：resolve→locate→ 投递到 agent 会话
   // source: 'sms'（回短信）| 'group'（回群广播）；groupId 群聊时带；groupConvId 群级会话 id（RCS 持续会话）
@@ -655,7 +712,7 @@ function PhoneOverlay(): JSX.Element {
       try {
         const d = await (await fetch(`${PHONE_BASE}/api/v1/phone/messages?did=${encodeURIComponent(AGENT_DID)}&since=${lastSeq}`, { headers: { Accept: 'application/json' }, cache: 'no-store' })).json()
         if (d.messages && d.messages.length) {
-          setLastSeq(Math.max(...d.messages.map((m: any) => m.seq || 0)))
+          bumpSeq(Math.max(...d.messages.map((m: any) => m.seq || 0)))
           // 短信列表：排除信令 + 群消息（群消息有自己的会话流）
           setSmsLog((l) => [...l, ...d.messages.filter((m: any) => !m.signal && !m.groupId).map((m: any) => ({
             fromNumber: m.fromNumber || '对端', text: m.text || undefined,
@@ -801,9 +858,22 @@ function PhoneOverlay(): JSX.Element {
     }).catch(() => {})
   }
 
+  // 已消费信令去重（localStorage：signal id → 处理过；防刷新/多面板重复消费持久化信令）
+  const SIG_KEY = 'dsh-phone-sig-' + AGENT_DID.replace(/[^A-Za-z0-9]/g, '')
+  function signalSeen(id: string | undefined): boolean {
+    if (!id) return false
+    try {
+      const seen = JSON.parse(localStorage.getItem(SIG_KEY) || '[]') as string[]
+      if (seen.includes(id)) return true
+      seen.push(id)
+      localStorage.setItem(SIG_KEY, JSON.stringify(seen.slice(-200)))  // 只留最近 200 条
+      return false
+    } catch { return false }
+  }
   async function handleSignal(m: any): Promise<void> {
     const sig = m.signal
     if (!sig) return
+    if (signalSeen(m.id)) return  // 已处理过的信令（刷新后轮询到持久化旧信令）不再触发
     // 旧版本/无身份来源的信令（fromNumber 为 '信令'）不再处理
     if (!m.fromNumber || m.fromNumber === '信令') return
     // 同页双面板共享组件：发给任一号码的信令都可能是本页的

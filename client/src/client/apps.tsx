@@ -39,7 +39,19 @@ export interface AppData {
   /** 通讯录 / 开户 / 用量 */
   contacts: Array<{ number: string; agentDid: string; displayName: string | null; level: number }> | null
   contactsErr: string
-  account: { numbers: string[]; applying: boolean; done: string | null; err: string; credits: number; welcome: number }
+  account: {
+    numbers: string[]
+    applying: boolean
+    done: string | null
+    err: string
+    credits: number
+    welcome: number
+    /** agent 注册状态：unknown | unregistered | registered */
+    agentState: string
+    agentLevel: number
+    agentLevelName: string
+    registering: boolean
+  }
   usage: any
   /** 主题 */
   theme: Theme
@@ -65,6 +77,9 @@ export interface AppActions {
   createGroup(name: string, members: string[]): Promise<{ gid: string | null; error: string }>
   groupBack(): void
   applyAccount(displayName?: string): void
+  /** 注册 agent（名字 + author → L 等级）；未注册时开户第 1 步 */
+  registerAgent(displayName: string, author: string): void
+  checkAgentRegistered(): void
   dial(fromId: 'A' | 'B', target: string): void
   answer(): void
   hangup(): void

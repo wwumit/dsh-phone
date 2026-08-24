@@ -97,7 +97,7 @@ export function apply(ctx: Context): void {
         if (!msg.role.includes('assistant')) continue
         if (i < seenCount) continue          // 已处理过
         const text = msg.text
-        if (!text.trim() || text.length > 2000) continue
+        if (!text.trim() || text.length > 10000) continue   // v2: 10k（长内容走文本附件）
         // 不做内容过滤：extractText 已跳过 reasoning 块，text 块即 AI 最终回答（自由模式下不再误杀）
         const key = sid + ':' + i + ':' + text.slice(0, 50)
         if (seen.has(key)) continue
@@ -112,14 +112,14 @@ export function apply(ctx: Context): void {
           const toNum = src.fromNumber.replace(/[^0-9+]/g, '')
           fetch(`${PHONE_BASE}/api/v1/phone/message`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ from: AGENT_DID, fromNumber: AGENT_DID, to: toNum, text: `[agent回复] ${text}` }),
+            body: JSON.stringify({ from: AGENT_DID, fromNumber: AGENT_DID, to: toNum, text: `[agent回复·${AGENT_SHORT}] ${text}`, agent: { did: AGENT_DID, name: AGENT_SHORT, level: ownLevel } }),
           }).catch(() => {})
           routed++
         } else if (src.source === 'group' && src.groupId) {
           // 回群广播（来源=group）：agent 回复广播回群；带 conversationId 保持群级会话语义
           fetch(`${PHONE_BASE}/api/v1/phone/group/message`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ from: AGENT_DID, fromNumber: AGENT_DID, groupId: src.groupId, ...(src.conversationId ? { conversationId: src.conversationId } : {}), text: `[agent回复] ${text}` }),
+            body: JSON.stringify({ from: AGENT_DID, fromNumber: AGENT_DID, groupId: src.groupId, ...(src.conversationId ? { conversationId: src.conversationId } : {}), text: `[agent回复·${AGENT_SHORT}] ${text}`, agent: { did: AGENT_DID, name: AGENT_SHORT, level: ownLevel } }),
           }).catch(() => {})
           routed++
         }
@@ -133,10 +133,12 @@ export function apply(ctx: Context): void {
   // ── 收件箱消费者（跨设备投递桥）：轮询 registry 收件箱（自己的 DID）→ 新消息注入本实例会话 → AI 回复
   // 投递与实例解耦：任何实例 @ 本 agent，消息进收件箱，由本实例 node 半处理
   let ownNickname = ''
+  let ownLevel = 0
   async function refreshNickname(): Promise<void> {
     try {
       const d = await (await fetch(`${PHONE_BASE}/api/v1/did/${AGENT_DID}`, { headers: { Accept: 'application/json' } })).json()
       ownNickname = (d?.metadata?.name) || (d?.metadata?.author) || ''
+      ownLevel = Number(d?.level) || 0
     } catch { /* 静默 */ }
   }
   // 群消息是否 @ 自己（短名 或 昵称）
@@ -192,9 +194,22 @@ export function apply(ctx: Context): void {
         const srcTag = m.groupId
           ? `<dsh-phone>{"source":"group","fromNumber":"${fromNumber}","conversationId":"${m.conversationId || ''}","groupId":"${m.groupId}"}</dsh-phone>`
           : `<dsh-phone>{"source":"sms","fromNumber":"${fromNumber}"}</dsh-phone>`
+        // v2 文本附件：kind=text 时拉取全文注入 prompt（长内容 → LLM 上下文对齐）
+        let bodyText = text
+        if (m.attachment && m.attachment.kind === 'text' && m.attachment.fileId) {
+          const full = await fetch(`${PHONE_BASE}/api/v1/phone/attachment/${m.attachment.fileId}`, { headers: { Accept: 'application/octet-stream' } })
+            .then((r) => r.ok ? r.text() : '').catch(() => '')
+          if (full) {
+            const MAX_INJECT = 50000   // 单次注入上限（防超长附件占满上下文）
+            const shown = full.length > MAX_INJECT ? full.slice(0, MAX_INJECT) + '\n...(附件已截断)' : full
+            bodyText = `[文本附件 ${m.attachment.name || 'file'}（${full.length} 字符）]\n${shown}`
+          } else {
+            bodyText = `[文本附件 ${m.attachment.name || 'file'} 拉取失败，仅引用]\n${text}`
+          }
+        }
         const prompt = m.groupId
-          ? `${srcTag} [群聊消息] ${fromNumber} 在群里发来消息，请直接回复（回复会原样发回群里）。消息：${text}`
-          : `${srcTag} [电话短信] 号码 ${fromNumber} 发来短信，请直接回复（你的回复会原样回给该号码）。短信内容：${text}`
+          ? `${srcTag} [群聊消息] ${fromNumber} 在群里发来消息，请直接回复（回复会原样发回群里）。消息：${bodyText}`
+          : `${srcTag} [电话短信] 号码 ${fromNumber} 发来短信，请直接回复（你的回复会原样回给该号码）。短信内容：${bodyText}`
         const ok = await promptSession(sid, prompt)
         if (ok) injected++
         // 无论注入成败都推进游标（避免死循环重试同一条）

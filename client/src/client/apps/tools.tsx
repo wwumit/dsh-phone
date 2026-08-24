@@ -66,17 +66,38 @@ export function AccountApp(p: AppProps): JSX.Element {
   const { t, data, actions, back } = p
   const account = data.account
   const [acctName, setAcctName] = useState('')
+  const [agentAuthor, setAgentAuthor] = useState('')
   const [agreed, setAgreed] = useState(false)
   const [showTerms, setShowTerms] = useState(false)
+  // 打开时检测 agent 注册状态（一次）
+  const [checked, setChecked] = useState(false)
+  if (!checked) { setChecked(true); actions.checkAgentRegistered() }
+  const agentRegistered = account.agentState === 'registered'
+  const agentUnknown = account.agentState === 'unknown'
+  const stepDone = (n: number) => (
+    <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 18, height: 18, borderRadius: '50%', background: t.ok, color: '#fff', fontSize: 11, marginRight: 6 }}>✓</span>
+  )
+  const stepNum = (n: number) => (
+    <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 18, height: 18, borderRadius: '50%', background: t.accent, color: '#fff', fontSize: 11, marginRight: 6 }}>{n}</span>
+  )
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <AppBar title="电话开户" onBack={back} theme={t} />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '8px 4px', overflowY: 'auto', minHeight: 0 }}>
         <div style={{ fontSize: 10, color: t.sub, marginBottom: 8 }}>{AGENT_DID}</div>
+        {/* 身份状态卡 */}
         <div style={{ width: '100%', background: t.key, borderRadius: 12, padding: 10, marginBottom: 8 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6 }}>
-            <span style={{ color: t.sub }}>🪙 积分余额</span>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <span style={{ fontSize: 12, color: t.sub }}>🪙 积分余额</span>
             <span style={{ color: t.warn, fontWeight: 600 }}>{account.credits}</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <span style={{ fontSize: 11, color: t.sub }}>🤖 Agent 身份</span>
+            {agentUnknown
+              ? <span style={{ fontSize: 11, color: t.muted }}>检测中…</span>
+              : agentRegistered
+                ? <span style={{ fontSize: 11, color: t.ok }}>已注册 · {account.agentLevelName}</span>
+                : <span style={{ fontSize: 11, color: t.bad }}>未注册（需第 1 步）</span>}
           </div>
           <div style={{ fontSize: 11, color: t.sub, marginBottom: 4 }}>我的号码（最多 2 部）</div>
           {account.numbers.length === 0
@@ -89,17 +110,51 @@ export function AccountApp(p: AppProps): JSX.Element {
             ))}
           <div style={{ fontSize: 10, color: t.muted, marginTop: 4 }}>{account.numbers.length}/2</div>
         </div>
+
+        {/* ── 第 1 步：注册 Agent（未注册时显示）── */}
+        {!agentRegistered && (
+          <div style={{ width: '100%', background: t.key, borderRadius: 12, padding: 10, marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+              {agentRegistered ? stepDone(1) : stepNum(1)}<span style={{ color: t.text }}>注册你的 Agent 身份</span>
+            </div>
+            {agentUnknown && <div style={{ fontSize: 11, color: t.muted, marginBottom: 6 }}>正在确认身份状态…</div>}
+            {!agentUnknown && (
+              <>
+                <div style={{ fontSize: 10, color: t.sub, marginBottom: 6, lineHeight: 1.6 }}>
+                  你的 agent 是通话/群聊里的"人"。给 ta 起个名字（显示在通讯录和群里），
+                  并填写主体名（你的名字或组织）——<b style={{ color: t.text }}>有主体名 → 信任等级 L2</b>（可参与群聊协作）；
+                  不填则为 L0（会被信任门禁拒绝 @）。
+                </div>
+                <input value={acctName} onChange={(e) => setAcctName(e.target.value)} placeholder="Agent 名字（如：我的助手 Alice）"
+                  style={{ width: '100%', boxSizing: 'border-box', background: t.screen, color: '#fff', border: '1px solid #2c2c2e', borderRadius: 10, padding: '7px 10px', fontSize: 13, marginBottom: 8 }} />
+                <input value={agentAuthor} onChange={(e) => setAgentAuthor(e.target.value)} placeholder="主体名（你的名字/组织，决定 L2）"
+                  style={{ width: '100%', boxSizing: 'border-box', background: t.screen, color: '#fff', border: '1px solid #2c2c2e', borderRadius: 10, padding: '7px 10px', fontSize: 13, marginBottom: 8 }} />
+                <button onClick={() => actions.registerAgent(acctName.trim() || AGENT_DID.replace(/^did:cha2a:agent:/, ''), agentAuthor.trim())}
+                  disabled={account.registering || !acctName.trim()}
+                  style={{ width: '100%', height: 38, borderRadius: 999, background: acctName.trim() ? t.accent : t.border, color: acctName.trim() ? '#fff' : t.sub, border: 0, fontSize: 14, cursor: acctName.trim() ? 'pointer' : 'not-allowed' }}>
+                  {account.registering ? '注册中…' : '注册 Agent（第 1 步）'}
+                </button>
+                {account.done === AGENT_DID && !agentRegistered && (
+                  <div style={{ marginTop: 8, fontSize: 12, color: t.ok, textAlign: 'center' }}>✅ 身份已确认，请继续第 2 步</div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ── 第 2 步：申请号码（agent 已注册或未确认时均可用；未注册点击会转引导）── */}
         {account.numbers.length < 2 && (
-          <div style={{ width: '100%' }}>
-            <input value={acctName} onChange={(e) => setAcctName(e.target.value)} placeholder="显示名（可选）"
-              style={{ width: '100%', boxSizing: 'border-box', background: t.key, color: '#fff', border: '1px solid #2c2c2e', borderRadius: 10, padding: '7px 10px', fontSize: 13, marginBottom: 8 }} />
+          <div style={{ width: '100%', background: t.key, borderRadius: 12, padding: 10, marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+              {account.numbers.length > 0 ? stepDone(2) : stepNum(2)}<span style={{ color: t.text }}>申请电话号码</span>
+            </div>
             <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, fontSize: 11, color: t.sub, marginBottom: 8, cursor: 'pointer' }}>
               <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)}
                 style={{ marginTop: 1, accentColor: t.accent }} />
               <span>我已阅读并同意<button onClick={(e) => { e.preventDefault(); setShowTerms(true) }} style={{ background: 'none', border: 'none', color: t.accent, fontSize: 11, cursor: 'pointer', padding: 0 }}>《服务说明（实验）》</button></span>
             </label>
             {showTerms && (
-              <div style={{ marginBottom: 8, padding: 10, borderRadius: 10, background: t.key, maxHeight: 120, overflowY: 'auto', fontSize: 10, color: '#94a3b8', lineHeight: 1.7 }}>
+              <div style={{ marginBottom: 8, padding: 10, borderRadius: 10, background: t.screen, maxHeight: 120, overflowY: 'auto', fontSize: 10, color: '#94a3b8', lineHeight: 1.7 }}>
                 <b style={{ color: '#e2e8f0' }}>dsh-phone 服务说明（实验）</b><br />
                 实验项目：不保证持续可用/无中断/无错误；服务可随时调整或终止。<br />
                 记录号码、Agent 身份与用量元数据（时长/计数/大小）；不记录通话/短信/附件内容；数据不出售。<br />
@@ -113,7 +168,7 @@ export function AccountApp(p: AppProps): JSX.Element {
               style={{ width: '100%', height: 38, borderRadius: 999, background: agreed ? t.ok : t.border, color: agreed ? '#fff' : t.sub, border: 0, fontSize: 14, cursor: agreed ? 'pointer' : 'not-allowed' }}>
               {account.applying ? '申请中…' : agreed ? '申请号码（开户）' : '请先勾选同意服务说明'}
             </button>
-            {account.done && (
+            {account.done && agentRegistered && (
               <div style={{ marginTop: 8, padding: 10, borderRadius: 10, background: 'rgba(52,211,153,.12)', fontSize: 13, textAlign: 'center' }}>
                 🎉 开户成功！<br /><span style={{ fontSize: 16, fontWeight: 600, letterSpacing: 1 }}>{account.done}</span>
                 {account.welcome > 0 && <div style={{ marginTop: 6, fontSize: 13, color: t.warn }}>🪙 +{account.welcome} 积分（第一批开户礼）</div>}
