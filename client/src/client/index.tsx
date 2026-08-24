@@ -870,9 +870,20 @@ function PhoneOverlay(): JSX.Element {
       return false
     } catch { return false }
   }
+  // 信令时效（TTL）：超过该时长的信令视为陈旧，不再触发振铃（历史残留 offer 会在刷新后误振铃）
+  const SIGNAL_TTL_MS = 5 * 60 * 1000   // 5 分钟
   async function handleSignal(m: any): Promise<void> {
     const sig = m.signal
     if (!sig) return
+    // 陈旧信令过滤：at 超过 TTL 的 offer/answer/candidate 不再处理
+    // （振铃超时 30s 已处理"未应答"；这里的 TTL 防"历史信令在刷新后被重放"）
+    if (m.at) {
+      const age = Date.now() - Date.parse(m.at)
+      if (!isNaN(age) && age > SIGNAL_TTL_MS) {
+        signalSeen(m.id)   // 顺手标记为已见（防反复检查）
+        return
+      }
+    }
     if (signalSeen(m.id)) return  // 已处理过的信令（刷新后轮询到持久化旧信令）不再触发
     // 旧版本/无身份来源的信令（fromNumber 为 '信令'）不再处理
     if (!m.fromNumber || m.fromNumber === '信令') return
