@@ -299,7 +299,7 @@ function PhonePanel(props: {
   }
 
   function loadUsage(): void {
-    fetch(`${PHONE_BASE}/api/v1/phone/usage?did=${encodeURIComponent('did:cha2a:agent:dshlib')}`, { headers: { Accept: 'application/json' } })
+    fetch(`${PHONE_BASE}/api/v1/phone/usage?did=${encodeURIComponent(AGENT_DID)}`, { headers: { Accept: 'application/json' } })
       .then((r) => r.json())
       .then((d) => setUsage(d.usage))
       .catch(() => {})
@@ -550,7 +550,7 @@ function PhoneOverlay(): JSX.Element {
       if (mentioned === AGENT_DID.replace(/^did:cha2a:agent:/, '')) continue
       const isAgentMember = (currentGroup.members || []).some((mm) => mm === `did:cha2a:agent:${mentioned}`)
       if (isAgentMember) {
-        const ok = await sendSmsToAgent(mentioned, text, from === 'A' ? '+86 95123 0001' : '+86 95123 0002', 'group', currentGroup.groupId, currentGroup.conversationId)
+        const ok = await sendSmsToAgent(mentioned, text, from === 'A' ? NUM_A : NUM_B, 'group', currentGroup.groupId, currentGroup.conversationId)
         if (ok) res.delivered.push(mentioned)
         else res.failed.push(mentioned)
       }
@@ -690,7 +690,7 @@ function PhoneOverlay(): JSX.Element {
     if (m && !attachment) {
       const agentName = m[1]
       const content = m[2].trim()
-      const fromNumber = from === 'A' ? '+86 95123 0001' : '+86 95123 0002'
+      const fromNumber = from === 'A' ? NUM_A : NUM_B
       const delivered = await sendSmsToAgent(agentName, content, fromNumber)
       setSmsLog((l) => [...l, { fromNumber: `@${agentName}`, text: content, ts: Date.now() }])
       return
@@ -773,8 +773,7 @@ function PhoneOverlay(): JSX.Element {
   const myRole = useRef<'caller' | 'callee' | null>(null)
   const myNumRef = useRef<string | null>(null)
   const callTargetRef = useRef<string | null>(null)   // 当前呼叫目标号码（跨设备信令寻址）
-  const NUM_A = '+86951230001'
-  const NUM_B = '+86951230002'
+  // NUM_A/NUM_B 已从 config 导入（MINE_NUM 环境变量推导），此处不重复定义
 
   // 拨号：解析号码 → 设置通话状态（ringing）→ 对端面板被唤起
   // 振铃超时：30s 无应答自动挂断（防测试残留/对方不接一直响）
@@ -1020,10 +1019,10 @@ function PhoneOverlay(): JSX.Element {
 
   return (
     <>
-      <PhonePanel id="A" label="dshlib · 电话 A" ownNumber={MINE_NUM.A} otherNumber={PEER_NUM.A}
+      <PhonePanel id="A" label={`${MINE_NUM.A} · 电话 A`} ownNumber={MINE_NUM.A} otherNumber={PEER_NUM.A}
         badgeLevel={3} smsList={smsLog} onSendSms={sendSms} voice={voiceFace}
         group={{ list: groupList, current: currentGroup, msgs: groupMsgLog, onLoadList: loadGroupList, onCreate: createGroup, onOpen: (gid) => { setCurrentGroup(null); setGroupMsgLog([]); return openGroup(gid) }, onSend: sendGroup, onLeave: leaveGroup, onDisband: disbandGroup, onAnnouncement: setAnnouncement, onBack: () => { setCurrentGroup(null); setGroupMsgLog([]) } }} onReport={reportUsage} theme={themeOf('A')} unlocked={unlocked} onUnlock={onUnlock} onSelectTheme={(n) => onSelectTheme('A', n)} top={topPanel === 'A'} onFocus={() => setTopPanel('A')} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} pos={pos.A} onDragStart={(e) => startDrag('A', e)} justDragged={justDragged} />
-      <PhonePanel id="B" label="dshlib · 电话 B" ownNumber={MINE_NUM.B} otherNumber={PEER_NUM.B}
+      <PhonePanel id="B" label={`${MINE_NUM.B} · 电话 B`} ownNumber={MINE_NUM.B} otherNumber={PEER_NUM.B}
         badgeLevel={3} smsList={smsLog} onSendSms={sendSms} voice={voiceFace}
         group={{ list: groupList, current: currentGroup, msgs: groupMsgLog, onLoadList: loadGroupList, onCreate: createGroup, onOpen: (gid) => { setCurrentGroup(null); setGroupMsgLog([]); return openGroup(gid) }, onSend: sendGroup, onLeave: leaveGroup, onDisband: disbandGroup, onAnnouncement: setAnnouncement, onBack: () => { setCurrentGroup(null); setGroupMsgLog([]) } }} onReport={reportUsage} theme={themeOf('B')} unlocked={unlocked} onUnlock={onUnlock} onSelectTheme={(n) => onSelectTheme('B', n)} top={topPanel === 'B'} onFocus={() => setTopPanel('B')} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} pos={pos.B} onDragStart={(e) => startDrag('B', e)} justDragged={justDragged} />
     </>
