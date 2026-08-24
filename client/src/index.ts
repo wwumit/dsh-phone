@@ -138,7 +138,9 @@ export function apply(ctx: Context): void {
     try {
       const d = await (await fetch(`${PHONE_BASE}/api/v1/did/${AGENT_DID}`, { headers: { Accept: 'application/json' } })).json()
       ownNickname = (d?.metadata?.name) || (d?.metadata?.author) || ''
-      ownLevel = Number(d?.level) || 0
+      // 等级在 trust/query 端点（did 文档顶层无 level）
+      const t = await (await fetch(`${PHONE_BASE}/api/v1/trust/query?did=${encodeURIComponent(AGENT_DID)}`, { headers: { Accept: 'application/json' } })).json()
+      ownLevel = Number(t?.level ?? t?.trust?.level) || 0
     } catch { /* 静默 */ }
   }
   // 群消息是否 @ 自己（短名 或 昵称）
