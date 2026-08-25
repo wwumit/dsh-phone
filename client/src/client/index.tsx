@@ -16,6 +16,7 @@ import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
 import { PHONE_BASE, RCS_BASE, AGENT_DID, OWNER_DID, MINE_NUM, PEER_NUM, NUM_A, NUM_B, THEME_KEY, UNLOCKED_KEY, AGENT_LABEL, OWNER_LABEL } from './config'
+import { loadAgentProfile } from './profile'
 import { THEMES, SF, type Theme } from './theme'
 import { api, ApiError } from './api'
 import { registerApp, getApp, type AppData, type AppActions, type AppProps } from './apps'
@@ -562,11 +563,17 @@ function PhoneOverlay(): JSX.Element {
     let alive = true
     const load = async () => {
       const out = { a: AGENT_LABEL, b: OWNER_LABEL }
-      // agent 注册名
+      // agent 展示名：优先 RCS 业务档案（agent profile），回退 registry 注册名
       try {
-        const da = await (await fetch(`${PHONE_BASE}/api/v1/did/${encodeURIComponent(AGENT_DID)}`, { headers: { Accept: 'application/json' } })).json()
-        if (alive && da && da.metadata && (da.metadata.name || da.metadata.author)) out.a = da.metadata.name || da.metadata.author
+        const prof = await loadAgentProfile(AGENT_DID)
+        if (alive && prof && prof.displayName) out.a = prof.displayName
       } catch {}
+      if (out.a === AGENT_LABEL) {
+        try {
+          const da = await (await fetch(`${PHONE_BASE}/api/v1/did/${encodeURIComponent(AGENT_DID)}`, { headers: { Accept: 'application/json' } })).json()
+          if (alive && da && da.metadata && (da.metadata.name || da.metadata.author)) out.a = da.metadata.name || da.metadata.author
+        } catch {}
+      }
       // owner 注册名（B 面板身份）
       if (OWNER_DID) {
         try {
