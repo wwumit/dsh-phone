@@ -53,9 +53,13 @@ export const PEER_NUM = { A: MINE_NUM.B, B: MINE_NUM.A } as Record<'A' | 'B', st
 export const NUM_A = MINE_NUM.A.replace(/[^0-9+]/g, '')
 export const NUM_B = MINE_NUM.B.replace(/[^0-9+]/g, '')
 
-// 本地存储 key（设备态；将来按 agent DID 命名空间化以支持多账号零痕迹）
-export const THEME_KEY = 'dsh-phone-theme'
-export const UNLOCKED_KEY = 'dsh-phone-unlocked'
-export const NOTE_KEY = 'dsh-phone-note'
+// 本地存储 key（设备态）——按 agent DID 命名空间化：设备通用、切号零痕迹（微信模型）。
+// 键名含 DID（含冒号，localStorage 键名允许）；node 半文件名需另做安全化（见 src/index.ts）。
+export function agentKey(suffix: string): string {
+  return AGENT_DID ? `dsh-phone:${AGENT_DID}:${suffix}` : `dsh-phone:${suffix}`
+}
+export const THEME_KEY = agentKey('theme')
+export const UNLOCKED_KEY = agentKey('unlocked')
+export const NOTE_KEY = agentKey('note')
 // v2：浮标改为胶囊形显示名字后，旧 pos（52px 圆钮时代）不再贴合，升级重置一次
-export const POS_KEY = 'dsh-phone-pos-v2'
+export const POS_KEY = agentKey('pos-v2')

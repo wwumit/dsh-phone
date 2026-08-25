@@ -15,7 +15,7 @@ import React, { useRef, useState, useSyncExternalStore } from 'react'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
-import { PHONE_BASE, RCS_BASE, AGENT_DID, OWNER_DID, MINE_NUM, PEER_NUM, NUM_A, NUM_B, THEME_KEY, UNLOCKED_KEY, AGENT_LABEL, OWNER_LABEL } from './config'
+import { PHONE_BASE, RCS_BASE, AGENT_DID, OWNER_DID, MINE_NUM, PEER_NUM, NUM_A, NUM_B, THEME_KEY, UNLOCKED_KEY, AGENT_LABEL, OWNER_LABEL, agentKey } from './config'
 import { loadAgentProfile } from './profile'
 import { THEMES, SF, type Theme } from './theme'
 import { api, ApiError } from './api'
@@ -637,7 +637,7 @@ function PhoneOverlay(): JSX.Element {
     } catch {}
   }
   // 群已读游标：localStorage（groupId → 已读 seq）；打开群 / 收到当前群新消息时更新
-  const GROUP_READ_KEY = 'dsh-phone-group-read'
+  const GROUP_READ_KEY = agentKey('group-read')
   function loadGroupRead(): Record<string, number> { try { return JSON.parse(localStorage.getItem(GROUP_READ_KEY) || '{}') } catch { return {} } }
   function saveGroupRead(r: Record<string, number>): void { try { localStorage.setItem(GROUP_READ_KEY, JSON.stringify(r)) } catch {} }
   function markGroupRead(groupId: string, seq?: number): void {
@@ -773,7 +773,7 @@ function PhoneOverlay(): JSX.Element {
 
   // ── 每部电话独立位置（拖动锚点，屏幕坐标 left/top；localStorage 持久化）──
   // v3：初始位置改为 DSH 对话框内部右侧（v2 的窗口右上角旧位置不再贴合，升级重置）
-  const POS_KEY = 'dsh-phone-pos-v3'
+  const POS_KEY = agentKey('pos-v3')
   // 缺省位置：DSH 对话框内部右侧（对话区容器内，不遮挡输入区）——用 DOM 查询对话区，找不到回退窗口右侧
   function defaultPos(): Record<'A' | 'B', { x: number; y: number }> {
     let box: DOMRect | null = null

@@ -6,10 +6,10 @@
 import React, { useState } from 'react'
 import { type AppProps } from '../apps'
 import { AppBar } from '../theme'
-import { PHONE_BASE, RCS_BASE, AGENT_DID } from '../config'
+import { PHONE_BASE, RCS_BASE, AGENT_DID, agentKey } from '../config'
 
-// 群已读游标（localStorage：groupId → 已读 seq；未读数 = lastMsgSeq - readSeq）
-const READ_KEY = 'dsh-phone-group-read'
+// 群已读游标（localStorage：groupId → 已读 seq；未读数 = lastMsgSeq - readSeq；按 DID 命名空间化）
+const READ_KEY = agentKey('group-read')
 function loadRead(): Record<string, number> { try { return JSON.parse(localStorage.getItem(READ_KEY) || '{}') } catch { return {} } }
 function saveRead(segs: Record<string, number>): void { localStorage.setItem(READ_KEY, JSON.stringify(segs)) }
 
