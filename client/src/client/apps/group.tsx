@@ -66,10 +66,10 @@ export function GroupApp(p: AppProps): JSX.Element {
           <input value={newGroupName} onChange={(e) => setNewGroupName(e.target.value)} placeholder="群名称"
             style={{ width: '100%', boxSizing: 'border-box', background: t.key, color: '#fff', border: '1px solid #2c2c2e', borderRadius: 8, padding: '7px 10px', fontSize: 13, marginBottom: 6 }} />
           {/* 成员选择：号码成员（通讯录）+ agent 成员（已注册，含无号码的）+ 手动补充 */}
-          <div style={{ fontSize: 10, color: t.sub, marginBottom: 4 }}>成员（号码成员 + agent 成员，均点选；也可手输）</div>
+          <div style={{ fontSize: 10, color: t.sub, marginBottom: 4 }}>成员（📞 号码成员 / 🤖 agent 成员（无号码），均点选；也可手输）</div>
           <div style={{ maxHeight: 132, overflowY: 'auto', background: t.key, borderRadius: 8, padding: 6, marginBottom: 6 }}>
             {!data.contacts && !data.agents && <div style={{ fontSize: 11, color: t.muted, padding: 4 }}>成员加载中…</div>}
-            {/* 号码成员（有号码的，人/agent 的号码） */}
+            {/* 号码成员（有号码的：人 或 agent 的号码——通讯录） */}
             {data.contacts?.map((c) => {
               const on = picked.includes(c.number)
               return (
@@ -85,8 +85,8 @@ export function GroupApp(p: AppProps): JSX.Element {
                 </button>
               )
             })}
-            {/* agent 成员（已注册，含无号码的；用 DID 入群） */}
-            {data.agents?.filter((a) => a.agentDid !== AGENT_DID).map((a) => {
+            {/* agent 成员组：仅无号码的 agent（有号码的已在号码成员组，避免重复） */}
+            {data.agents?.filter((a) => a.agentDid !== AGENT_DID && (!a.numbers || a.numbers.length === 0)).map((a) => {
               const on = picked.includes(a.agentDid)
               return (
                 <button key={a.agentDid} onClick={() => togglePick(a.agentDid)}
