@@ -227,10 +227,17 @@ export function GroupChatApp(p: AppProps): JSX.Element {
     }
   }
   function pickAt(c: { key: string; label: string; isAgent: boolean }): void {
-    // 用 @名字 替换掉输入流末尾的 @查询；插入昵称（与候选显示一致）——agent 显示昵称、号码显示短号
+    // 用 @名字 替换掉输入流末尾的 @查询
+    // 昵称含空格/中文时无法被 @正则（[\w\u4e00-\u9fa5.-]，空格截断）正确解析 → 回退用短名（agent DID 短名 / 号码）
     const at = groupInput.lastIndexOf('@')
     const head = at === -1 ? groupInput : groupInput.slice(0, at)
-    const mention = c.isAgent ? (c.label || c.key.split(':').pop()!) : c.key.replace(/^\+86\s*/, '').replace(/^\+86/, '')
+    let mention: string
+    if (c.isAgent) {
+      const nick = c.label || c.key.split(':').pop()!
+      mention = /[\s]/.test(nick) ? c.key.split(':').pop()! : nick
+    } else {
+      mention = c.key.replace(/^\+86\s*/, '').replace(/^\+86/, '')
+    }
     setGroupInput(head + '@' + mention + ' ')
     setAtQuery(null)
   }
