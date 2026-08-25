@@ -525,6 +525,11 @@ function PhoneOverlay(): JSX.Element {
   // 发送群消息（广播；@agent 走投递，@人仅广播提及）返回投递结果供 UI 反馈
   async function sendGroup(from: string, text: string): Promise<{ delivered: string[]; failed: string[]; error?: string }> {
     const res = { delivered: [] as string[], failed: [] as string[], error: undefined as string | undefined }
+    // 身份守卫：未开户（agent 未注册）禁止发言——身份不明不能参与群聊
+    if (account.agentState === 'unregistered') {
+      res.error = '⚠ 身份未注册，不能在群里发言。请先打开「开户」完成 agent 注册（第 1 步）'
+      return res
+    }
     if (!currentGroup) return res
     // 提取所有 @ 提及（任意位置：开头/句中/句尾）
     const mentions = [...new Set([...text.matchAll(/@([\w.-]+)/g)].map((m) => m[1]))]
@@ -686,6 +691,11 @@ function PhoneOverlay(): JSX.Element {
 
   // 短信经中继发送（registry 投递 + 收件箱；同页与跨设备同链路）
   async function sendSms(from: 'A' | 'B', text?: string, attachment?: SmsMsg['attachment'], to?: string): Promise<void> {
+    // 身份守卫：未开户禁止发短信
+    if (account.agentState === 'unregistered') {
+      if (text) console.warn('[dsh-phone] 身份未注册，禁止发送短信')
+      return
+    }
     // @agent 投递：文本以 @<agent名> 开头 → resolve→locate→ 投递到 agent 会话（智能体互联网寻址）
     const m = text && text.match(/^@([\w.-]+)\s+([\s\S]*)$/)
     if (m && !attachment) {
