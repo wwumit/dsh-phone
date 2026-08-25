@@ -247,9 +247,10 @@ export function GroupChatApp(p: AppProps): JSX.Element {
         {data.group.msgs.length === 0
           ? <div style={{ fontSize: 12, color: t.muted }}>群消息为空（发 @agent 可与智能体协作）</div>
           : data.group.msgs.map((m, i) => {
-            // "自己" = 本面板号码 或 本面板绑定的 agent（node 半回复带 AGENT_DID，算我方发言靠右）
+            // "自己" = 本面板号码发的（右侧）；agent 回复（fromNumber=DID 或带 agent 字段）是对方，左侧带 🤖
+            // （群聊里 @dshlib 的是别人，dshlib 的回复是"对方 agent"，不是用户自己发的）
             const norm = (s: string) => String(s || '').replace(/[^0-9+]/g, '')
-            const mine = !!m.fromNumber && (norm(m.fromNumber) === norm(data.ownNumber) || m.fromNumber === AGENT_DID)
+            const mine = !!m.fromNumber && !m.agent && norm(m.fromNumber) === norm(data.ownNumber)
             const sn = senderName(m.fromNumber || '')
             // v2 多 agent：优先用消息自带 agent 字段（node 半回复归属），回退成员映射
             const agentInfo = m.agent || (sn.type === 'agent' ? { did: '', name: sn.name, level: sn.level } : null)
