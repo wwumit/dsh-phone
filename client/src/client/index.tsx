@@ -15,7 +15,7 @@ import React, { useRef, useState, useSyncExternalStore } from 'react'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
-import { PHONE_BASE, AGENT_DID, MINE_NUM, PEER_NUM, NUM_A, NUM_B, THEME_KEY, UNLOCKED_KEY } from './config'
+import { PHONE_BASE, AGENT_DID, MINE_NUM, PEER_NUM, NUM_A, NUM_B, THEME_KEY, UNLOCKED_KEY, AGENT_LABEL, OWNER_LABEL } from './config'
 import { THEMES, SF, type Theme } from './theme'
 import { api, ApiError } from './api'
 import { registerApp, getApp, type AppData, type AppActions, type AppProps } from './apps'
@@ -618,11 +618,12 @@ function PhoneOverlay(): JSX.Element {
   function loadPos(): Record<'A' | 'B', { x: number; y: number }> {
     try {
       const d = JSON.parse(localStorage.getItem(POS_KEY) || '{}')
+      // 缺省：DSH 对话框右上角上方（右侧上部，不遮挡对话输入区）
       return {
-        A: { x: typeof d.A?.x === 'number' ? d.A.x : window.innerWidth - 90, y: typeof d.A?.y === 'number' ? d.A.y : window.innerHeight - 160 },
-        B: { x: typeof d.B?.x === 'number' ? d.B.x : window.innerWidth - 150, y: typeof d.B?.y === 'number' ? d.B.y : window.innerHeight - 160 },
+        A: { x: typeof d.A?.x === 'number' ? d.A.x : window.innerWidth - 90, y: typeof d.A?.y === 'number' ? d.A.y : window.innerHeight * 0.22 },
+        B: { x: typeof d.B?.x === 'number' ? d.B.x : window.innerWidth - 150, y: typeof d.B?.y === 'number' ? d.B.y : window.innerHeight * 0.22 },
       }
-    } catch { return { A: { x: window.innerWidth - 90, y: window.innerHeight - 160 }, B: { x: window.innerWidth - 150, y: window.innerHeight - 160 } } }
+    } catch { return { A: { x: window.innerWidth - 90, y: window.innerHeight * 0.22 }, B: { x: window.innerWidth - 150, y: window.innerHeight * 0.22 } } }
   }
   const [pos, setPos] = useState<Record<'A' | 'B', { x: number; y: number }>>(loadPos)
   const posRef = useRef(pos)
@@ -1043,10 +1044,10 @@ function PhoneOverlay(): JSX.Element {
 
   return (
     <>
-      <PhonePanel id="A" label={`${MINE_NUM.A} · 电话 A`} ownNumber={MINE_NUM.A} otherNumber={PEER_NUM.A}
+      <PhonePanel id="A" label={`${AGENT_LABEL} · ${MINE_NUM.A}`} ownNumber={MINE_NUM.A} otherNumber={PEER_NUM.A}
         badgeLevel={3} smsList={smsLog} onSendSms={sendSms} voice={voiceFace}
         group={{ list: groupList, current: currentGroup, msgs: groupMsgLog, onLoadList: loadGroupList, onCreate: createGroup, onOpen: (gid) => { setCurrentGroup(null); setGroupMsgLog([]); return openGroup(gid) }, onSend: sendGroup, onLeave: leaveGroup, onDisband: disbandGroup, onAnnouncement: setAnnouncement, onBack: () => { setCurrentGroup(null); setGroupMsgLog([]) } }} onReport={reportUsage} theme={themeOf('A')} unlocked={unlocked} onUnlock={onUnlock} onSelectTheme={(n) => onSelectTheme('A', n)} top={topPanel === 'A'} onFocus={() => setTopPanel('A')} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} pos={pos.A} onDragStart={(e) => startDrag('A', e)} justDragged={justDragged} />
-      <PhonePanel id="B" label={`${MINE_NUM.B} · 电话 B`} ownNumber={MINE_NUM.B} otherNumber={PEER_NUM.B}
+      <PhonePanel id="B" label={`${OWNER_LABEL} · ${MINE_NUM.B}`} ownNumber={MINE_NUM.B} otherNumber={PEER_NUM.B}
         badgeLevel={3} smsList={smsLog} onSendSms={sendSms} voice={voiceFace}
         group={{ list: groupList, current: currentGroup, msgs: groupMsgLog, onLoadList: loadGroupList, onCreate: createGroup, onOpen: (gid) => { setCurrentGroup(null); setGroupMsgLog([]); return openGroup(gid) }, onSend: sendGroup, onLeave: leaveGroup, onDisband: disbandGroup, onAnnouncement: setAnnouncement, onBack: () => { setCurrentGroup(null); setGroupMsgLog([]) } }} onReport={reportUsage} theme={themeOf('B')} unlocked={unlocked} onUnlock={onUnlock} onSelectTheme={(n) => onSelectTheme('B', n)} top={topPanel === 'B'} onFocus={() => setTopPanel('B')} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} pos={pos.B} onDragStart={(e) => startDrag('B', e)} justDragged={justDragged} />
     </>

@@ -14,6 +14,12 @@ declare const process: any
 
 export const PHONE_BASE = process.env.DSH_PHONE_BASE || 'https://compliancehub.cn'
 export const AGENT_DID = process.env.DSH_PHONE_DID || 'did:cha2a:agent:dshlib'   // 电话对应的 agent 身份（号码簿绑定）
+// Owner 终端身份（预留）：主人可注册独立 DID（2.0）；当前 owner 终端用纯号码（B 面板的 MINE_NUM.B）
+export const OWNER_DID = process.env.DSH_PHONE_OWNER_DID || ''   // 空 = 用纯号码（主人无 agent）
+
+// 终端显示名（可 env 覆盖）
+export const AGENT_LABEL = process.env.DSH_PHONE_AGENT_LABEL || 'CH数字员工001号'   // Agent 终端名
+export const OWNER_LABEL = process.env.DSH_PHONE_OWNER_LABEL || 'CH员工001'        // Owner 终端名
 export const STORE_URL = 'https://compliancehub.cn/store/'
 
 // 双面板号码（同页两部电话演示）；A/B 可由环境变量覆盖
