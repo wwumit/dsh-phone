@@ -88,8 +88,8 @@ export function GroupApp(p: AppProps): JSX.Element {
                   <span style={{ width: 18, height: 18, borderRadius: 5, border: on ? '2px solid #0a84ff' : '1px solid #48484a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: '#fff', flexShrink: 0 }}>
                     {on ? '✓' : ''}
                   </span>
-                  <img src={`${PHONE_BASE}/store/assets/l${c.level}.png`} alt={`L${c.level}`} style={{ height: 14, flexShrink: 0 }} />
-                  <span style={{ flex: 1, fontSize: 12, color: '#fff' }}>{c.displayName || c.agentDid.split(':').pop()}</span>
+                  <img src={`${PHONE_BASE}/store/assets/l${c.level ?? 0}.png`} alt={`L${c.level ?? 0}`} style={{ height: 14, flexShrink: 0 }} />
+                  <span style={{ flex: 1, fontSize: 12, color: '#fff' }}>{c.displayName || (c.agentDid ? c.agentDid.split(':').pop() : c.number.slice(-4))}</span>
                   <span style={{ fontSize: 11, color: t.sub }}>{c.number}</span>
                 </button>
               )
@@ -104,9 +104,9 @@ export function GroupApp(p: AppProps): JSX.Element {
                   <span style={{ width: 18, height: 18, borderRadius: 5, border: on ? '2px solid #0a84ff' : '1px solid #48484a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: '#fff', flexShrink: 0 }}>
                     {on ? '✓' : ''}
                   </span>
-                  <img src={`${PHONE_BASE}/store/assets/l${a.level}.png`} alt={`L${a.level}`} style={{ height: 14, flexShrink: 0 }} />
-                  <span style={{ flex: 1, fontSize: 12, color: '#fff' }}>🤖 {a.name}</span>
-                  <span style={{ fontSize: 10, color: a.numbers.length ? t.sub : t.warn }}>{a.numbers.length ? a.numbers.join('、') : '无号码'}</span>
+                  <img src={`${PHONE_BASE}/store/assets/l${a.level ?? 0}.png`} alt={`L${a.level ?? 0}`} style={{ height: 14, flexShrink: 0 }} />
+                  <span style={{ flex: 1, fontSize: 12, color: '#fff' }}>🤖 {a.name || (a.agentDid ? a.agentDid.split(':').pop() : 'agent')}</span>
+                  <span style={{ fontSize: 10, color: (a.numbers && a.numbers.length) ? t.sub : t.warn }}>{(a.numbers && a.numbers.length) ? a.numbers.join('、') : '无号码'}</span>
                 </button>
               )
             })}
