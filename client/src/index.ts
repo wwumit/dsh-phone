@@ -13,15 +13,20 @@ import path from 'path'
 export const name = 'dsh-phone'
 export const inject = ['sessionQuery', 'webServer']
 
-const PHONE_BASE = process.env.DSH_PHONE_BASE || 'https://compliancehub.cn'
-const AGENT_DID = process.env.DSH_PHONE_DID || 'did:cha2a:agent:dshlib'
+// 安全读取 env：DSH 加载器（cordis）某些版本无全局 process（报 "Can't find variable: process"）
+// → typeof 守卫回退默认值，火山/本地（有 process）与用户机（无 process）都能加载
+const hasProcess = typeof process !== 'undefined' && !!process?.env
+const env = (k: string, d: string) => (hasProcess ? (process.env[k] || d) : d)
+
+const PHONE_BASE = env('DSH_PHONE_BASE', 'https://compliancehub.cn')
+const AGENT_DID = env('DSH_PHONE_DID', 'did:cha2a:agent:dshlib')
 const AGENT_SHORT = AGENT_DID.split(':').pop() || 'dshlib'
 // 本环境号码（node 半回短信/群的兜底 fromNumber；运行时读 env，缺省同演示配置）
-const NUM_A = (process.env.DSH_PHONE_NUM_A || '+86 95123 0001').replace(/[^0-9+]/g, '')
+const NUM_A = env('DSH_PHONE_NUM_A', '+86 95123 0001').replace(/[^0-9+]/g, '')
 const REPLY_INTERVAL = 2500          // 轮询间隔（回复路由时延大头，2.5s）
 const SEEN_MAX = 200                 // 已处理消息去重上限
 // 轮询游标持久化：重启后不重放历史回复（游标按 sid 记录已处理消息数；inbox 记录收件箱 seq）
-const CURSOR_FILE = path.join(process.env.DSH_HOME || '/tmp', 'dsh-phone-cursor.json')
+const CURSOR_FILE = path.join(env('DSH_HOME', '/tmp'), 'dsh-phone-cursor.json')
 const INBOX_KEY = 'inbox'           // 收件箱消费者游标键（跨设备投递）
 
 function loadCursor(): Record<string, number> {
