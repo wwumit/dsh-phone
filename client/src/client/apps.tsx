@@ -39,6 +39,8 @@ export interface AppData {
   /** 通讯录 / 开户 / 用量 */
   contacts: Array<{ number: string; agentDid: string; displayName: string | null; level: number }> | null
   contactsErr: string
+  /** 所有已注册 agent（含无号码的，建群选人用） */
+  agents: Array<{ agentDid: string; name: string; level: number; numbers: string[] }> | null
   account: {
     numbers: string[]
     applying: boolean
@@ -67,6 +69,7 @@ export interface AppActions {
   sendSms(fromId: 'A' | 'B', text?: string, attachment?: any, to?: string): void
   sendGroup(from: string, text: string): Promise<{ delivered: string[]; failed: string[]; error?: string }> | void
   loadContacts(): void
+  loadAgents(): void
   loadAccount(): void
   loadUsage(): void
   loadGroupList(): void

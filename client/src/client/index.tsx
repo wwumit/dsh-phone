@@ -206,6 +206,7 @@ function PhonePanel(props: {
   }
   const [contacts, setContacts] = useState<Array<{ number: string; agentDid: string; displayName: string | null; level: number }> | null>(null)
   const [contactsErr, setContactsErr] = useState('')
+  const [agents, setAgents] = useState<Array<{ agentDid: string; name: string; level: number; numbers: string[] }> | null>(null)
   const [usage, setUsage] = useState<any>(null)
   const [account, setAccount] = useState<{ numbers: string[]; applying: boolean; done: string | null; err: string; credits: number; welcome: number; agentState: string; agentLevel: number; agentLevelName: string; registering: boolean }>({ numbers: [], applying: false, done: null, err: '', credits: 0, welcome: 0, agentState: 'unknown', agentLevel: 0, agentLevelName: '', registering: false })
 
@@ -266,6 +267,16 @@ function PhonePanel(props: {
       checkAgentRegistered()
       setAccount((a) => ({ ...a, registering: false, done: AGENT_DID }))
     } catch { setAccount((a) => ({ ...a, registering: false, err: '网络错误' })) }
+  }
+
+  /** 拉取所有已注册 agent（含无号码的，建群选人用） */
+  function loadAgents(): void {
+    if (!agents) {
+      fetch(`${PHONE_BASE}/api/v1/agent/list`, { headers: { Accept: 'application/json' } })
+        .then((r) => r.json())
+        .then((d) => setAgents(d.agents || []))
+        .catch(() => {})
+    }
   }
 
   function loadAccount(): void {
@@ -338,7 +349,7 @@ function PhonePanel(props: {
     dialTarget: target,
     smsList: props.smsList,
     group: props.group,
-    contacts, contactsErr,
+    contacts, contactsErr, agents,
     account, usage,
     theme: t, unlocked: props.unlocked,
     call: props.call,
@@ -347,7 +358,7 @@ function PhonePanel(props: {
     nav, back,
     sendSms: (from, text, attachment, to) => props.onSendSms(from, text, attachment, to),
     sendGroup: (from, text) => props.group.onSend(from, text),
-    loadContacts, loadAccount, loadUsage,
+    loadContacts, loadAgents, loadAccount, loadUsage,
     loadGroupList: () => props.group.onLoadList(),
     openGroup: (gid) => props.group.onOpen(gid),
     leaveGroup: (gid, member) => props.group.onLeave(gid, member),

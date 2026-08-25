@@ -27,6 +27,7 @@ export function GroupApp(p: AppProps): JSX.Element {
     const next = !showCreateGroup
     setShowCreateGroup(next)
     if (next && !data.contacts) actions.loadContacts()
+    if (next && !data.agents) actions.loadAgents()
   }
   // 点选/取消联系人
   function togglePick(number: string): void {
@@ -64,11 +65,11 @@ export function GroupApp(p: AppProps): JSX.Element {
         <div style={{ marginTop: 8, background: '#0c0c0e', borderRadius: 12, padding: 10 }}>
           <input value={newGroupName} onChange={(e) => setNewGroupName(e.target.value)} placeholder="群名称"
             style={{ width: '100%', boxSizing: 'border-box', background: t.key, color: '#fff', border: '1px solid #2c2c2e', borderRadius: 8, padding: '7px 10px', fontSize: 13, marginBottom: 6 }} />
-          {/* 成员选择：通讯录点选 + 手动补充 */}
-          <div style={{ fontSize: 10, color: t.sub, marginBottom: 4 }}>成员（从通讯录点选；也可手输 agent DID）</div>
+          {/* 成员选择：号码成员（通讯录）+ agent 成员（已注册，含无号码的）+ 手动补充 */}
+          <div style={{ fontSize: 10, color: t.sub, marginBottom: 4 }}>成员（号码成员 + agent 成员，均点选；也可手输）</div>
           <div style={{ maxHeight: 132, overflowY: 'auto', background: t.key, borderRadius: 8, padding: 6, marginBottom: 6 }}>
-            {!data.contacts && <div style={{ fontSize: 11, color: t.muted, padding: 4 }}>通讯录加载中…</div>}
-            {data.contacts && data.contacts.length === 0 && <div style={{ fontSize: 11, color: t.muted, padding: 4 }}>通讯录为空</div>}
+            {!data.contacts && !data.agents && <div style={{ fontSize: 11, color: t.muted, padding: 4 }}>成员加载中…</div>}
+            {/* 号码成员（有号码的，人/agent 的号码） */}
             {data.contacts?.map((c) => {
               const on = picked.includes(c.number)
               return (
@@ -81,6 +82,22 @@ export function GroupApp(p: AppProps): JSX.Element {
                   <img src={`${PHONE_BASE}/store/assets/l${c.level}.png`} alt={`L${c.level}`} style={{ height: 14, flexShrink: 0 }} />
                   <span style={{ flex: 1, fontSize: 12, color: '#fff' }}>{c.displayName || c.agentDid.split(':').pop()}</span>
                   <span style={{ fontSize: 11, color: t.sub }}>{c.number}</span>
+                </button>
+              )
+            })}
+            {/* agent 成员（已注册，含无号码的；用 DID 入群） */}
+            {data.agents?.filter((a) => a.agentDid !== AGENT_DID).map((a) => {
+              const on = picked.includes(a.agentDid)
+              return (
+                <button key={a.agentDid} onClick={() => togglePick(a.agentDid)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', background: on ? 'rgba(10,132,255,.18)' : 'transparent',
+                    border: on ? '1px solid #0a84ff' : '1px solid transparent', borderRadius: 8, padding: '5px 8px', marginBottom: 3, cursor: 'pointer' }}>
+                  <span style={{ width: 18, height: 18, borderRadius: 5, border: on ? '2px solid #0a84ff' : '1px solid #48484a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: '#fff', flexShrink: 0 }}>
+                    {on ? '✓' : ''}
+                  </span>
+                  <img src={`${PHONE_BASE}/store/assets/l${a.level}.png`} alt={`L${a.level}`} style={{ height: 14, flexShrink: 0 }} />
+                  <span style={{ flex: 1, fontSize: 12, color: '#fff' }}>🤖 {a.name}</span>
+                  <span style={{ fontSize: 10, color: a.numbers.length ? t.sub : t.warn }}>{a.numbers.length ? a.numbers.join('、') : '无号码'}</span>
                 </button>
               )
             })}
