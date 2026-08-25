@@ -5,7 +5,7 @@
 import React, { useState } from 'react'
 import { type AppProps } from '../apps'
 import { AppBar, AppIcon, SF, THEMES } from '../theme'
-import { PHONE_BASE, AGENT_DID, STORE_URL, NOTE_KEY } from '../config'
+import { PHONE_BASE, AGENT_DID, OWNER_DID, STORE_URL, NOTE_KEY } from '../config'
 import { DSHLIB_ICON } from '../dshlibIcon'
 
 // ── 通讯录 ──
@@ -67,13 +67,17 @@ export function AccountApp(p: AppProps): JSX.Element {
   const account = data.account
   const [acctName, setAcctName] = useState('')
   const [agentAuthor, setAgentAuthor] = useState('')
+  const [ownerName, setOwnerName] = useState('')
+  const [ownerAuthor, setOwnerAuthor] = useState('')
   const [agreed, setAgreed] = useState(false)
   const [showTerms, setShowTerms] = useState(false)
   // 打开时检测 agent 注册状态（一次）
   const [checked, setChecked] = useState(false)
-  if (!checked) { setChecked(true); actions.checkAgentRegistered() }
+  if (!checked) { setChecked(true); actions.checkAgentRegistered(); actions.checkOwnerRegistered() }
   const agentRegistered = account.agentState === 'registered'
   const agentUnknown = account.agentState === 'unknown'
+  const ownerRegistered = account.ownerState === 'registered'
+  const ownerUnknown = account.ownerState === 'unknown'
   const stepDone = (n: number) => (
     <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 18, height: 18, borderRadius: '50%', background: t.ok, color: '#fff', fontSize: 11, marginRight: 6 }}>✓</span>
   )
@@ -98,6 +102,14 @@ export function AccountApp(p: AppProps): JSX.Element {
               : agentRegistered
                 ? <span style={{ fontSize: 11, color: t.ok }}>已注册 · {account.agentLevelName}</span>
                 : <span style={{ fontSize: 11, color: t.bad }}>未注册（需第 1 步）</span>}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <span style={{ fontSize: 11, color: t.sub }}>👤 Owner 身份（操作人员）</span>
+            {ownerUnknown
+              ? <span style={{ fontSize: 11, color: t.muted }}>检测中…</span>
+              : ownerRegistered
+                ? <span style={{ fontSize: 11, color: t.ok }}>已注册 · {account.ownerName || OWNER_DID.split(':').pop()}</span>
+                : <span style={{ fontSize: 11, color: t.bad }}>未注册（需第 2 步）</span>}
           </div>
           <div style={{ fontSize: 11, color: t.sub, marginBottom: 4 }}>我的号码（最多 2 部）</div>
           {account.numbers.length === 0
@@ -142,11 +154,42 @@ export function AccountApp(p: AppProps): JSX.Element {
           </div>
         )}
 
-        {/* ── 第 2 步：申请号码（agent 已注册或未确认时均可用；未注册点击会转引导）── */}
+        {/* ── 第 2 步：注册 Owner（操作人员身份；有明确身份才能在群里发言）── */}
+        {agentRegistered && !ownerRegistered && OWNER_DID && (
+          <div style={{ width: '100%', background: t.key, borderRadius: 12, padding: 10, marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+              {ownerRegistered ? stepDone(2) : stepNum(2)}<span style={{ color: t.text }}>注册你的 Owner 身份（操作人员）</span>
+            </div>
+            {ownerUnknown && <div style={{ fontSize: 11, color: t.muted, marginBottom: 6 }}>正在确认 Owner 状态…</div>}
+            {!ownerUnknown && (
+              <>
+                <div style={{ fontSize: 10, color: t.sub, marginBottom: 6, lineHeight: 1.6 }}>
+                  Owner 是你（操作人员本人）在通话/群聊里的身份，与 agent 各是各的——
+                  <b style={{ color: t.text }}>owner 未注册时，B 面板不能在群里发言</b>（身份不明不能发言）。
+                  填你的名字 + 主体名（有主体名 → 信任等级 L2）。
+                </div>
+                <input value={ownerName} onChange={(e) => setOwnerName(e.target.value)} placeholder="Owner 名字（如：CH员工001）"
+                  style={{ width: '100%', boxSizing: 'border-box', background: t.screen, color: '#fff', border: '1px solid #2c2c2e', borderRadius: 10, padding: '7px 10px', fontSize: 13, marginBottom: 8 }} />
+                <input value={ownerAuthor} onChange={(e) => setOwnerAuthor(e.target.value)} placeholder="主体名（你的名字/组织，决定 L2）"
+                  style={{ width: '100%', boxSizing: 'border-box', background: t.screen, color: '#fff', border: '1px solid #2c2c2e', borderRadius: 10, padding: '7px 10px', fontSize: 13, marginBottom: 8 }} />
+                <button onClick={() => actions.registerOwner(ownerName.trim() || OWNER_DID.split(':').pop() || '', ownerAuthor.trim())}
+                  disabled={account.ownerRegistering || !ownerName.trim()}
+                  style={{ width: '100%', height: 38, borderRadius: 999, background: ownerName.trim() ? t.accent : t.border, color: ownerName.trim() ? '#fff' : t.sub, border: 0, fontSize: 14, cursor: ownerName.trim() ? 'pointer' : 'not-allowed' }}>
+                  {account.ownerRegistering ? '注册中…' : '注册 Owner（第 2 步）'}
+                </button>
+                {account.done === OWNER_DID && !ownerRegistered && (
+                  <div style={{ marginTop: 8, fontSize: 12, color: t.ok, textAlign: 'center' }}>✅ Owner 身份已确认，请继续第 3 步</div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ── 第 3 步：申请号码（agent 已注册或未确认时均可用；未注册点击会转引导）── */}
         {account.numbers.length < 2 && (
           <div style={{ width: '100%', background: t.key, borderRadius: 12, padding: 10, marginBottom: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-              {account.numbers.length > 0 ? stepDone(2) : stepNum(2)}<span style={{ color: t.text }}>申请电话号码</span>
+              {account.numbers.length > 0 ? stepDone(3) : stepNum(3)}<span style={{ color: t.text }}>申请电话号码</span>
             </div>
             <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, fontSize: 11, color: t.sub, marginBottom: 8, cursor: 'pointer' }}>
               <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)}

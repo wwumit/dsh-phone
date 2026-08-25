@@ -15,7 +15,7 @@ import React, { useRef, useState, useSyncExternalStore } from 'react'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
-import { PHONE_BASE, AGENT_DID, MINE_NUM, PEER_NUM, NUM_A, NUM_B, THEME_KEY, UNLOCKED_KEY, AGENT_LABEL, OWNER_LABEL } from './config'
+import { PHONE_BASE, AGENT_DID, OWNER_DID, MINE_NUM, PEER_NUM, NUM_A, NUM_B, THEME_KEY, UNLOCKED_KEY, AGENT_LABEL, OWNER_LABEL } from './config'
 import { THEMES, SF, type Theme } from './theme'
 import { api, ApiError } from './api'
 import { registerApp, getApp, type AppData, type AppActions, type AppProps } from './apps'
@@ -209,7 +209,7 @@ function PhonePanel(props: {
   const [contactsErr, setContactsErr] = useState('')
   const [agents, setAgents] = useState<Array<{ agentDid: string; name: string; level: number; numbers: string[] }> | null>(null)
   const [usage, setUsage] = useState<any>(null)
-  const [account, setAccount] = useState<{ numbers: string[]; applying: boolean; done: string | null; err: string; credits: number; welcome: number; agentState: string; agentLevel: number; agentLevelName: string; registering: boolean }>({ numbers: [], applying: false, done: null, err: '', credits: 0, welcome: 0, agentState: 'unknown', agentLevel: 0, agentLevelName: '', registering: false })
+  const [account, setAccount] = useState<{ numbers: string[]; applying: boolean; done: string | null; err: string; credits: number; welcome: number; agentState: string; agentLevel: number; agentLevelName: string; registering: boolean; ownerState: string; ownerName: string; ownerRegistering: boolean }>({ numbers: [], applying: false, done: null, err: '', credits: 0, welcome: 0, agentState: 'unknown', agentLevel: 0, agentLevelName: '', registering: false, ownerState: 'unknown', ownerName: '', ownerRegistering: false })
 
   // 来电强制唤起本面板
   const incoming = props.call && props.call.calleeId === props.id
@@ -270,6 +270,49 @@ function PhonePanel(props: {
     } catch { setAccount((a) => ({ ...a, registering: false, err: '网络错误' })) }
   }
 
+  /** 检测 Owner 身份（did:cha2a:user:<agent短名>-owner）是否已注册 + 注册名 */
+  function checkOwnerRegistered(): void {
+    if (!OWNER_DID) { setAccount((a) => ({ ...a, ownerState: 'unregistered', ownerName: '' })); return }
+    fetch(`${PHONE_BASE}/api/v1/did/${encodeURIComponent(OWNER_DID)}`, { headers: { Accept: 'application/json' } })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d && d.id === OWNER_DID) {
+          const meta = d.metadata || {}
+          setAccount((a) => ({ ...a, ownerState: 'registered', ownerName: meta.name || OWNER_DID.split(':').pop() || '', err: '' }))
+        } else {
+          setAccount((a) => ({ ...a, ownerState: 'unregistered', ownerName: '' }))
+        }
+      })
+      .catch(() => setAccount((a) => ({ ...a, ownerState: 'unregistered', err: '无法确认 Owner 状态' })))
+  }
+
+  /** 注册 Owner 身份（名字 + 主体名 → L2；owner 有明确身份才能在群里发言） */
+  async function registerOwner(displayName: string, author: string): Promise<void> {
+    if (!OWNER_DID) { setAccount((a) => ({ ...a, err: '本环境未配置 Owner DID' })); return }
+    setAccount((a) => ({ ...a, ownerRegistering: true, err: '' }))
+    try {
+      const short = OWNER_DID.split(':').pop() || ''
+      const r1 = await fetch(`${PHONE_BASE}/api/v1/register`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'user', id: short, metadata: { name: displayName, author } }),
+      })
+      const d1 = await r1.json()
+      if (r1.status !== 201) {
+        if (r1.status === 409 && author) {
+          await fetch(`${PHONE_BASE}/api/v1/update`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'user', id: short, metadata: { author } }),
+          })
+        } else {
+          setAccount((a) => ({ ...a, ownerRegistering: false, err: d1.error || 'Owner 注册失败' }))
+          return
+        }
+      }
+      checkOwnerRegistered()
+      setAccount((a) => ({ ...a, ownerRegistering: false, done: OWNER_DID }))
+    } catch { setAccount((a) => ({ ...a, ownerRegistering: false, err: '网络错误' })) }
+  }
+
   /** 拉取所有已注册 agent（含无号码的，建群选人用） */
   function loadAgents(): void {
     if (!agents) {
@@ -290,6 +333,7 @@ function PhonePanel(props: {
       .then((d) => { setAccount((a) => ({ ...a, credits: d.credits || 0 })) })
       .catch(() => {})
     checkAgentRegistered()
+    checkOwnerRegistered()
   }
   async function applyAccount(displayName = ''): Promise<void> {
     setAccount((a) => ({ ...a, applying: true, err: '' }))
@@ -345,6 +389,7 @@ function PhonePanel(props: {
   // ── App 装配：把本面板的 state/动作打包成 AppProps（App 只依赖此契约）──
   const appData: AppData = {
     ownNumber: props.ownNumber,
+    ownerDid: OWNER_DID,
     otherNumber: props.otherNumber,
     badgeLevel: props.badgeLevel,
     dialTarget: target,
@@ -370,6 +415,8 @@ function PhonePanel(props: {
     applyAccount,
     registerAgent,
     checkAgentRegistered,
+    registerOwner,
+    checkOwnerRegistered,
     dial: (fromId, num) => props.onDial(fromId, num),
     answer: () => props.onAnswer(),
     hangup,
@@ -479,12 +526,46 @@ function PhoneOverlay(): JSX.Element {
   const [themeB, setThemeB] = useState<string>(() => localStorage.getItem(THEME_KEY + '-b') || 'classic')
   const [unlocked, setUnlocked] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem(UNLOCKED_KEY) || '[]') } catch { return [] } })
   function themeOf(id: 'A' | 'B'): Theme { return THEMES[(id === 'A' ? themeA : themeB)] || THEMES.classic }
+  // ── 浮标显示名（注册名优先；无则通用占位——不硬编码任何主人专属名）──
+  // A 面板 = agent 注册名（metadata.name）；B 面板 = owner 注册名（metadata.name）→ 号码 displayName → 占位
+  const [dispName, setDispName] = useState<{ a: string; b: string }>({ a: AGENT_LABEL, b: OWNER_LABEL })
+  React.useEffect(() => {
+    let alive = true
+    const load = async () => {
+      const out = { a: AGENT_LABEL, b: OWNER_LABEL }
+      // agent 注册名
+      try {
+        const da = await (await fetch(`${PHONE_BASE}/api/v1/did/${encodeURIComponent(AGENT_DID)}`, { headers: { Accept: 'application/json' } })).json()
+        if (alive && da && da.metadata && (da.metadata.name || da.metadata.author)) out.a = da.metadata.name || da.metadata.author
+      } catch {}
+      // owner 注册名（B 面板身份）
+      if (OWNER_DID) {
+        try {
+          const db = await (await fetch(`${PHONE_BASE}/api/v1/did/${encodeURIComponent(OWNER_DID)}`, { headers: { Accept: 'application/json' } })).json()
+          if (alive && db && db.metadata && (db.metadata.name || db.metadata.author)) out.b = db.metadata.name || db.metadata.author
+        } catch {}
+      }
+      // 回退：B 号码 displayName（号码簿）
+      if (out.b === OWNER_LABEL) {
+        try {
+          const dd = await (await fetch(`${PHONE_BASE}/api/v1/phone/directory`, { headers: { Accept: 'application/json' } })).json()
+          if (alive && dd && Array.isArray(dd.numbers)) {
+            const mine = dd.numbers.find((n: any) => n.number.replace(/[^0-9+]/g, '') === NUM_B.replace(/[^0-9+]/g, ''))
+            if (mine && mine.displayName) out.b = mine.displayName
+          }
+        } catch {}
+      }
+      if (alive) setDispName(out)
+    }
+    load()
+    return () => { alive = false }
+  }, [])
   const [smsLog, setSmsLog] = useState<SmsMsg[]>([])
   // ── RCS 群（团队协作空间）：群列表 + 当前群 + 群消息（经 registry）──
   const [groupMsgs, setGroupMsgs] = useState<Array<{ from: string; text: string; ts: number }>>([])
   const [groupList, setGroupList] = useState<Array<{ groupId: string; name: string; memberCount: number }>>([])
   const [currentGroup, setCurrentGroup] = useState<{ groupId: string; name: string; members: string[]; conversationId?: string; createdBy?: string } | null>(null)
-  const [groupMsgLog, setGroupMsgLog] = useState<Array<{ fromNumber: string; text: string; ts: number; agent?: { did: string; name: string; level: number }; kind?: string; payload?: any; status?: string; seq?: number }>>([])
+  const [groupMsgLog, setGroupMsgLog] = useState<Array<{ from?: string; fromNumber: string; text: string; ts: number; agent?: { did: string; name: string; level: number }; kind?: string; payload?: any; status?: string; seq?: number }>>([])
   const groupLastSeq = useRef<Record<string, number>>({})
 
   // 群列表加载（我是成员/创建者）
@@ -527,7 +608,7 @@ function PhoneOverlay(): JSX.Element {
         const gm = (d.messages || [])
         if (gm.length) {
           groupLastSeq.current[groupId] = Math.max(...gm.map((m: any) => m.seq || 0), groupLastSeq.current[groupId] || 0)
-          const mapped = gm.map((m: any) => ({ fromNumber: m.fromNumber || '对端', text: m.text || '', ts: Date.parse(m.at) || Date.now(), ...(m.agent ? { agent: m.agent } : {}), ...(m.kind ? { kind: m.kind } : {}), ...(m.payload ? { payload: m.payload } : {}), ...(m.status ? { status: m.status } : {}), seq: m.seq }))
+          const mapped = gm.map((m: any) => ({ from: m.from || '', fromNumber: m.fromNumber || '对端', text: m.text || '', ts: Date.parse(m.at) || Date.now(), ...(m.agent ? { agent: m.agent } : {}), ...(m.kind ? { kind: m.kind } : {}), ...(m.payload ? { payload: m.payload } : {}), ...(m.status ? { status: m.status } : {}), seq: m.seq }))
           // force（打开群）：全量替换（防与轮询竞争重复）；增量：追加
           if (force) setGroupMsgLog(mapped)
           else setGroupMsgLog((l) => [...l, ...mapped])
@@ -538,9 +619,15 @@ function PhoneOverlay(): JSX.Element {
   // 发送群消息（广播；@agent 走投递，@人仅广播提及）返回投递结果供 UI 反馈
   async function sendGroup(from: string, text: string): Promise<{ delivered: string[]; failed: string[]; error?: string }> {
     const res = { delivered: [] as string[], failed: [] as string[], error: undefined as string | undefined }
-    // 身份守卫：未开户（agent 未注册）禁止发言——身份不明不能参与群聊
-    if (account.agentState === 'unregistered') {
-      res.error = '⚠ 身份未注册，不能在群里发言。请先打开「开户」完成 agent 注册（第 1 步）'
+    // 发言身份：A 面板 = agent（AGENT_DID）；B 面板 = owner（OWNER_DID，操作人员身份）——各是各的
+    const panelIsB = from === 'B'
+    const speakAs = panelIsB ? (OWNER_DID || MINE_NUM.B) : AGENT_DID
+    const speakNumber = panelIsB ? (OWNER_DID || MINE_NUM.B) : MINE_NUM.A
+    // 身份守卫：身份不明不能参与群聊——A 查 agent 注册、B 查 owner 注册（owner 未注册也不能发言）
+    if (panelIsB ? (account.ownerState === 'unregistered') : (account.agentState === 'unregistered')) {
+      res.error = panelIsB
+        ? '⚠ Owner 身份未注册，不能在群里发言。请先打开「开户」完成 Owner 注册（第 2 步）'
+        : '⚠ 身份未注册，不能在群里发言。请先打开「开户」完成 agent 注册（第 1 步）'
       return res
     }
     if (!currentGroup) return res
@@ -554,7 +641,7 @@ function PhoneOverlay(): JSX.Element {
     const conv = currentGroup.conversationId ? { conversationId: currentGroup.conversationId } : {}
     const r = await fetch(`${PHONE_BASE}/api/v1/phone/group/message`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: AGENT_DID, fromNumber: MINE_NUM[from === 'A' ? 'A' : 'B'], groupId: currentGroup.groupId, ...conv, text }),
+      body: JSON.stringify({ from: speakAs, fromNumber: speakNumber, groupId: currentGroup.groupId, ...conv, text }),
     }).catch(() => null)
     // 信任门禁/广播错误透传给 UI（409 = @agent 等级低于门禁；后端检查所有 @agent）
     if (r && r.status >= 400) {
@@ -575,7 +662,7 @@ function PhoneOverlay(): JSX.Element {
       }
     }
     // 乐观追加（立即显示自己的消息）+ 立即 force 刷新（替换为生产全量，防乐观+轮询重复）
-    setGroupMsgLog((l) => [...l, { fromNumber: MINE_NUM[from === 'A' ? 'A' : 'B'], text, ts: Date.now() }])
+    setGroupMsgLog((l) => [...l, { fromNumber: speakNumber, text, ts: Date.now() }])
     pollGroupMessages(currentGroup.groupId, true)
     return res
   }
@@ -706,8 +793,12 @@ function PhoneOverlay(): JSX.Element {
 
   // 短信经中继发送（registry 投递 + 收件箱；同页与跨设备同链路）
   async function sendSms(from: 'A' | 'B', text?: string, attachment?: SmsMsg['attachment'], to?: string): Promise<void> {
-    // 身份守卫：未开户禁止发短信
-    if (account.agentState === 'unregistered') {
+    // 发言身份：A 面板 = agent；B 面板 = owner（操作人员）——各是各的
+    const panelIsB = from === 'B'
+    const speakAs = panelIsB ? (OWNER_DID || MINE_NUM.B) : AGENT_DID
+    const speakNumber = panelIsB ? (OWNER_DID || MINE_NUM.B) : MINE_NUM.A
+    // 身份守卫：身份不明不能发短信——A 查 agent 注册、B 查 owner 注册
+    if (panelIsB ? (account.ownerState === 'unregistered') : (account.agentState === 'unregistered')) {
       if (text) console.warn('[dsh-phone] 身份未注册，禁止发送短信')
       return
     }
@@ -716,7 +807,7 @@ function PhoneOverlay(): JSX.Element {
     if (m && !attachment) {
       const agentName = m[1]
       const content = m[2].trim()
-      const fromNumber = from === 'A' ? NUM_A : NUM_B
+      const fromNumber = panelIsB ? NUM_B : NUM_A
       const delivered = await sendSmsToAgent(agentName, content, fromNumber)
       setSmsLog((l) => [...l, { fromNumber: `@${agentName}`, text: content, ts: Date.now() }])
       return
@@ -732,9 +823,9 @@ function PhoneOverlay(): JSX.Element {
         if (up.ok) att = { ...attachment, fileId: up.fileId, hash: up.hash }
       } catch { return }
     }
-    const body: any = { from: AGENT_DID, fromNumber: MINE_NUM[from], to, text: text || undefined, attachment: att ? { fileId: att.fileId, name: att.name, size: att.size, hash: att.hash } : undefined }
+    const body: any = { from: speakAs, fromNumber: speakNumber, to, text: text || undefined, attachment: att ? { fileId: att.fileId, name: att.name, size: att.size, hash: att.hash } : undefined }
     try { await fetch(`${PHONE_BASE}/api/v1/phone/message`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }) } catch { return }
-    setSmsLog((l) => [...l, { fromNumber: MINE_NUM[from], text, attachment: att, ts: Date.now() }])
+    setSmsLog((l) => [...l, { fromNumber: speakNumber, text, attachment: att, ts: Date.now() }])
   }
 
   // 轮询收件箱（增量，seq 游标；5s）
@@ -1047,10 +1138,10 @@ function PhoneOverlay(): JSX.Element {
 
   return (
     <>
-      <PhonePanel id="A" label={`${AGENT_LABEL} · ${MINE_NUM.A}`} floatLabel={AGENT_LABEL} ownNumber={MINE_NUM.A} otherNumber={PEER_NUM.A}
+      <PhonePanel id="A" label={`${dispName.a} · ${MINE_NUM.A}`} floatLabel={dispName.a} ownNumber={MINE_NUM.A} otherNumber={PEER_NUM.A}
         badgeLevel={3} smsList={smsLog} onSendSms={sendSms} voice={voiceFace}
         group={{ list: groupList, current: currentGroup, msgs: groupMsgLog, onLoadList: loadGroupList, onCreate: createGroup, onOpen: (gid) => { setCurrentGroup(null); setGroupMsgLog([]); return openGroup(gid) }, onSend: sendGroup, onLeave: leaveGroup, onDisband: disbandGroup, onAnnouncement: setAnnouncement, onBack: () => { setCurrentGroup(null); setGroupMsgLog([]) } }} onReport={reportUsage} theme={themeOf('A')} unlocked={unlocked} onUnlock={onUnlock} onSelectTheme={(n) => onSelectTheme('A', n)} top={topPanel === 'A'} onFocus={() => setTopPanel('A')} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} pos={pos.A} onDragStart={(e) => startDrag('A', e)} justDragged={justDragged} />
-      <PhonePanel id="B" label={`${OWNER_LABEL} · ${MINE_NUM.B}`} floatLabel={OWNER_LABEL} ownNumber={MINE_NUM.B} otherNumber={PEER_NUM.B}
+      <PhonePanel id="B" label={`${dispName.b} · ${MINE_NUM.B}`} floatLabel={dispName.b} ownNumber={MINE_NUM.B} otherNumber={PEER_NUM.B}
         badgeLevel={3} smsList={smsLog} onSendSms={sendSms} voice={voiceFace}
         group={{ list: groupList, current: currentGroup, msgs: groupMsgLog, onLoadList: loadGroupList, onCreate: createGroup, onOpen: (gid) => { setCurrentGroup(null); setGroupMsgLog([]); return openGroup(gid) }, onSend: sendGroup, onLeave: leaveGroup, onDisband: disbandGroup, onAnnouncement: setAnnouncement, onBack: () => { setCurrentGroup(null); setGroupMsgLog([]) } }} onReport={reportUsage} theme={themeOf('B')} unlocked={unlocked} onUnlock={onUnlock} onSelectTheme={(n) => onSelectTheme('B', n)} top={topPanel === 'B'} onFocus={() => setTopPanel('B')} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} pos={pos.B} onDragStart={(e) => startDrag('B', e)} justDragged={justDragged} />
     </>

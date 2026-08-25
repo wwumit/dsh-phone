@@ -174,9 +174,13 @@ export function GroupChatApp(p: AppProps): JSX.Element {
     }
   }, [cur.groupId])
 
-  // 消息发送者昵称：优先成员详情映射（成员 key 或归一化号码）；回退短号
+  // 消息发送者昵称：优先成员详情映射（成员 key 或归一化号码）；owner DID → owner 名；回退短号
   function senderName(fromNumber: string): { name: string; type: 'phone' | 'agent'; level: number } {
     const norm = (s: string) => s.replace(/[^0-9+]/g, '')
+    // owner（B 面板操作人员）发言：fromNumber=OWNER_DID → 显示 owner 注册名
+    if (data.ownerDid && (fromNumber === data.ownerDid || norm(fromNumber) === norm(data.ownerDid))) {
+      return { name: data.account.ownerName || 'Owner', type: 'agent' as const, level: 2 }
+    }
     const hit = Object.entries(nickMap).find(([k]) => norm(k) === norm(fromNumber) || k === fromNumber)
     if (hit) return { name: hit[1].nickname, type: hit[1].type, level: hit[1].level }
     return { name: fromNumber.replace(/^\+86 95123 0+/, '').replace(/^\+86/, ''), type: 'phone' as const, level: 0 }
@@ -266,8 +270,9 @@ export function GroupChatApp(p: AppProps): JSX.Element {
           : data.group.msgs.map((m, i) => {
             // "自己" = 本面板号码发的（右侧）；agent 回复（fromNumber=DID 或带 agent 字段）是对方，左侧带 🤖
             // （群聊里 @dshlib 的是别人，dshlib 的回复是"对方 agent"，不是用户自己发的）
+            // owner（B 面板）发言：from=OWNER_DID 也算"我"（操作人员身份）
             const norm = (s: string) => String(s || '').replace(/[^0-9+]/g, '')
-            const mine = !!m.fromNumber && !m.agent && norm(m.fromNumber) === norm(data.ownNumber)
+            const mine = (!!m.fromNumber && !m.agent && norm(m.fromNumber) === norm(data.ownNumber)) || (m.from === data.ownerDid && !m.agent)
             const sn = senderName(m.fromNumber || '')
             // v2 多 agent：优先用消息自带 agent 字段（node 半回复归属），回退成员映射
             const agentInfo = m.agent || (sn.type === 'agent' ? { did: '', name: sn.name, level: sn.level } : null)

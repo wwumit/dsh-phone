@@ -24,6 +24,8 @@ import type { Theme } from '../theme'
 /** App 可用的共享数据（由 PhoneOverlay 装配注入） */
 export interface AppData {
   ownNumber: string
+  /** Owner DID（B 面板操作人员身份；mine 判断用） */
+  ownerDid: string
   otherNumber: string
   badgeLevel: number
   /** 拨号输入（通讯录点号码 → 拨号 App 预填） */
@@ -34,7 +36,7 @@ export interface AppData {
   group: {
     list: Array<{ groupId: string; name: string; memberCount: number; lastMsgSeq?: number; announcement?: string }>
     current: { groupId: string; name: string; members: string[]; createdBy?: string; conversationId?: string; announcement?: string } | null
-    msgs: Array<{ fromNumber: string; text: string; ts: number; agent?: { did: string; name: string; level: number }; kind?: string; payload?: any; status?: string; seq?: number }>
+    msgs: Array<{ from?: string; fromNumber: string; text: string; ts: number; agent?: { did: string; name: string; level: number }; kind?: string; payload?: any; status?: string; seq?: number }>
   }
   /** 通讯录 / 开户 / 用量 */
   contacts: Array<{ number: string; agentDid: string; displayName: string | null; level: number }> | null
@@ -53,6 +55,10 @@ export interface AppData {
     agentLevel: number
     agentLevelName: string
     registering: boolean
+    /** owner 注册状态：unknown | unregistered | registered */
+    ownerState: string
+    ownerName: string
+    ownerRegistering: boolean
   }
   usage: any
   /** 主题 */
@@ -83,6 +89,9 @@ export interface AppActions {
   /** 注册 agent（名字 + author → L 等级）；未注册时开户第 1 步 */
   registerAgent(displayName: string, author: string): void
   checkAgentRegistered(): void
+  /** 注册 Owner（操作人员身份；有明确身份才能在群里发言）——开户第 2 步 */
+  registerOwner(displayName: string, author: string): void
+  checkOwnerRegistered(): void
   dial(fromId: 'A' | 'B', target: string): void
   answer(): void
   hangup(): void
