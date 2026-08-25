@@ -1,25 +1,24 @@
 # Changelog
 
-## [1.0.0] - 2026-08-24
+## [2.0.0] - 2026-08-25
 
-### Added — cross-device messaging (major)
-- **Cross-instance delivery bridge**: the node half now polls the registry inbox for its own DID and injects received messages into the local session — any device can `@` this agent and get a reply, regardless of which DSH instance sent the message
-- SMS recipient picker (`#` triggers the phonebook selector, keyboard-navigable); `sendSms` accepts a `to` target
-- Ringing timeout (30s auto-hangup) to prevent stuck ringing states
-- Incoming-call / calling / in-call overlay UI with answer & hangup (previously only a status icon)
-- Agent replies now carry the agent DID as sender (displayed on the left as "received" on every panel)
+### Added — message protocol v2 (major)
+- **Text length 10k** (was 2000); long content via text attachments (`attachment.kind=text` + `chars`) — agent reads full text into LLM context (up to 50k chars, truncated beyond)
+- **@ mention gate granularity**: partially-denied mentions now deliver to allowed agents + return `denied` list; only all-denied returns 409 `TRUST_GATE_DENIED`
+- **Message state machine**: `status` (active/recalled/deleted), `deliveredAt`, `readAt`; recall endpoint `POST /message/recall` (sender-only, 403 otherwise)
+- **Agent capability declaration**: `metadata.capabilities` on register; exposed in `members-detail`; `@` selector shows capability tags
+- **Structured messages**: `kind=card` + `payload` (title/fields/actions) — validated (card without payload → 400)
+- **Group message history pagination**: `GET /group/<id>/messages?since=&limit=` (aggregates all member inboxes)
+- **Unified error format**: `{error, code, detail}` across message paths
+- **Reply attribution**: `[agent回复·<short>]` prefix + `agent: {did, name, level}` field (multi-agent groups distinguishable)
 
 ### Fixed
-- Call signaling now addresses the dialed target instead of a fixed A↔B peer (cross-device dialing)
-- Same-page A↔B loopback calls can be answered again
-- `@` picker inserts DID short names (validation also matches nicknames)
-- Left/right message layout follows each panel's own number (`ownNumber` is env-configurable)
-- SMS & group message lists auto-scroll to the newest message
-- Cross-instance delivery no longer reports a false "delivery failed"
+- **Broadcast excludes sender** (self-DID and self-fromNumber no longer receive own messages)
+- **@ self no longer delivers** to own session (sendSmsToAgent + sendGroup double guard)
+- **node half resolveSession**: falls back through registry `alternatives` when primary session is stale (restart changes session id → was stuck "session not found", no replies)
+- **Signal TTL 5min**: stale offer/candidate from inbox no longer retriggers ringing on refresh
+- **Own level from `trust/query`** (DID document has no top-level level)
+- **Group messages via pagination endpoint** (not own-inbox filter) — own sent messages stay visible/right-aligned
+- **All hardcoded numbers/DIDs removed** (env-driven only); STUN server derived from PHONE_BASE (DSH_PHONE_STUN overridable); removed dead `CALLER_NUM`
 
-### Changed
-- Configuration is environment-variable driven (`DSH_PHONE_BASE`, `DSH_PHONE_DID`, `DSH_PHONE_NUM_A/B`) with unchanged defaults — one build serves any instance
-- Voice is labeled **beta**: cross-device voice requires a secure context (trusted HTTPS) and working NAT traversal
-
-## [0.6.0] - 2026-08-21
-- Initial public release: iPhone-style agent phone (dual-panel), RCS group chat, contacts, dialer, SMS, app registry
+## [1.0.0] - 2026-08-24
