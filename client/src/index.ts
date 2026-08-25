@@ -24,9 +24,41 @@ const RCS_BASE = PHONE_BASE + '/rcs'
 const AGENT_DID = env('DSH_PHONE_DID', 'did:cha2a:agent:dshlib')
 const AGENT_SHORT = AGENT_DID.split(':').pop() || 'dshlib'
 // 本环境号码（node 半回短信/群的兜底 fromNumber；运行时读 env，缺省同演示配置）
-const NUM_A = env('DSH_PHONE_NUM_A', '+86 95123 0001').replace(/[^0-9+]/g, '')
+// 保留原始显示格式（含空格）用于注入给 client；node 半内部用归一化后的 NUM_A/NUM_B
+const RAW_NUM_A = env('DSH_PHONE_NUM_A', '+86 95123 0001')
+const RAW_NUM_B = env('DSH_PHONE_NUM_B', '+86 95123 0002')
+const NUM_A = RAW_NUM_A.replace(/[^0-9+]/g, '')
+const NUM_B = RAW_NUM_B.replace(/[^0-9+]/g, '')
 // 号码归一化（与 client 半 sendGroup 的 normNum 一致：去 +86 前缀 + 非数字）
 function normNum(s: string): string { return String(s || '').replace(/^\+86/, '').replace(/[^0-9]/g, '') }
+
+// ── 客户端配置运行时注入（配置运行时化）──
+// 浏览器没有 process.env，身份/线路号/端点由 node 半运行时经 tapIndex 注入 window.__DSH_PHONE_CONFIG__，
+// client 半（config.ts）启动时读这个全局。这样 client.js 一份通用，不再按环境构建时烙身份。
+interface PhoneRuntimeConfig {
+  registryBase: string
+  rcsBase: string
+  agentDid: string
+  numA: string
+  numB: string
+}
+function buildPhoneConfig(): PhoneRuntimeConfig {
+  return {
+    registryBase: PHONE_BASE,
+    rcsBase: RCS_BASE,
+    agentDid: AGENT_DID,
+    numA: RAW_NUM_A,
+    numB: RAW_NUM_B,
+  }
+}
+// 照 DSH 官方 dsh-client-modules 的 injectBootManifest 写法：JSON 转义 < 后注入 <head>
+function injectPhoneConfig(html: string, cfg: PhoneRuntimeConfig): string {
+  const json = JSON.stringify(cfg).replaceAll('<', '\\u003c')
+  const script = `<script>window.__DSH_PHONE_CONFIG__ = ${json}</script>`
+  const head = html.indexOf('<head>')
+  if (head !== -1) return `${html.slice(0, head + 6)}${script}${html.slice(head + 6)}`
+  return `${script}${html}`
+}
 const REPLY_INTERVAL = 2500          // 轮询间隔（回复路由时延大头，2.5s）
 const SEEN_MAX = 200                 // 已处理消息去重上限
 // 轮询游标持久化：重启后不重放历史回复（游标按 sid 记录已处理消息数；inbox 记录收件箱 seq）
@@ -41,6 +73,12 @@ function saveCursor(c: Record<string, number>): void {
 }
 
 export function apply(ctx: Context): void {
+
+  // 客户端配置运行时注入：node 半把身份/线路号/端点经 tapIndex 注入 index.html（window.__DSH_PHONE_CONFIG__）
+  ctx.effect(
+    () => ctx.webServer.tapIndex((html) => injectPhoneConfig(html, buildPhoneConfig())),
+    'dsh-phone: config injection',
+  )
 
   // ── Agent 回复转回：读绑定会话最新 assistant 消息 → 按来源路由回电话 ──
   const seen = new Set<string>()

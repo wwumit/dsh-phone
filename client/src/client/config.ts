@@ -1,44 +1,59 @@
 /**
- * dsh-phone 统一配置（node 半与 client 半共享的常量集中于此）
+ * dsh-phone client 半统一配置（浏览器端）
  *
- * 注意：node 半（src/index.ts）是独立打包的，如需共享应放 src/shared/；
- * 此文件供 client 半（浏览器端）使用。node 半当前用 src/config 或内联，见 src/index.ts。
- *
- * 环境变量化（构建时注入，缺省值 = 通用占位，不设环境变量行为不变）：
- *   DSH_PHONE_BASE    registry 地址（缺省 https://compliancehub.cn）
- *   DSH_PHONE_DID     本环境 agent 身份（缺省 did:cha2a:agent:dshlib）
- *   DSH_PHONE_NUM_A/B 本环境两个号码（缺省 +86 95123 0001 / 0002）
- * 客户端由 tsdown define 注入；服务端（node 半）运行时读 process.env。
+ * 配置运行时化：身份 / 线路号 / 端点由 node 半在运行时经 webServer.tapIndex
+ * 注入 window.__DSH_PHONE_CONFIG__（见 src/index.ts buildPhoneConfig），
+ * client 半启动时读这个全局——浏览器没有 process.env，构建时也不再烙身份。
+ * 这样 client.js 一份通用、干净，不再按环境（dshlib/wwu-mac/volcano）各建一份。
+ * 注入缺失（异常场景）时回退到演示缺省值，保证插件仍可加载。
  */
-declare const process: any
 
-export const PHONE_BASE = process.env.DSH_PHONE_BASE || 'https://compliancehub.cn'
-// RCS 服务基址（微信类比）：消息/群/附件走独立的 rcs-server，经 nginx /rcs/ 前缀路由
-// 网关/身份端点（resolve/lookup/directory/apply/credits/agent 等）仍走 PHONE_BASE（registry）
-export const RCS_BASE = PHONE_BASE + '/rcs'
-export const AGENT_DID = process.env.DSH_PHONE_DID || 'did:cha2a:agent:dshlib'   // 电话对应的 agent 身份（号码簿绑定）
+// node 半注入的运行时配置形状（与 src/index.ts PhoneRuntimeConfig 对齐）
+interface PhoneRuntimeConfig {
+  registryBase: string
+  rcsBase: string
+  agentDid: string
+  numA: string
+  numB: string
+}
+
+function runtimeConfig(): Partial<PhoneRuntimeConfig> {
+  try {
+    const w = (typeof window !== 'undefined' ? window : {}) as { __DSH_PHONE_CONFIG__?: Partial<PhoneRuntimeConfig> }
+    return w.__DSH_PHONE_CONFIG__ || {}
+  } catch {
+    return {}
+  }
+}
+const INJ = runtimeConfig()
+
+// registry（HSS/HLR）：身份/号码/信任/解析；RCS（AS）：消息/群/附件
+// 注入缺失时为空（不烙任何演示身份），身份守卫据此判"未配置"，不会静默落到别人的身份
+export const PHONE_BASE = INJ.registryBase || 'https://compliancehub.cn'
+export const RCS_BASE = INJ.rcsBase || PHONE_BASE + '/rcs'
+export const AGENT_DID = INJ.agentDid || ''
 
 // Owner 终端身份（2.0）：owner 也注册独立 DID（did:cha2a:user:<agent短名>-owner），
-// 开户 App 注册（填 owner 名字）后才能发言；未注册时 B 面板以纯号码身份发言（号码在簿即可）
-export const OWNER_DID = process.env.DSH_PHONE_OWNER_DID || (AGENT_DID.startsWith('did:cha2a:agent:') ? `did:cha2a:user:${AGENT_DID.replace(/^did:cha2a:agent:/, '')}-owner` : '')
+// 开户 App 注册后才能发言；未注册时 B 面板以纯号码身份发言（号码在簿即可）
+export const OWNER_DID = AGENT_DID.startsWith('did:cha2a:agent:')
+  ? `did:cha2a:user:${AGENT_DID.replace(/^did:cha2a:agent:/, '')}-owner`
+  : ''
 
-// 终端缺省显示名（通用占位；实际显示名 = registry 注册名，见 index.tsx loadNames）：
-// 用户开户时自定义的名字优先（agent metadata.name / owner metadata.name / 号码 displayName），
-// 未注册或无显示名时回退到此处占位——每个 agent 的主人都可自定义，不硬编码任何主人专属名
-export const AGENT_LABEL = process.env.DSH_PHONE_AGENT_LABEL || 'Agent'
-export const OWNER_LABEL = process.env.DSH_PHONE_OWNER_LABEL || 'Owner'
+// 终端缺省显示名（通用占位；实际显示名 = registry 注册名 / RCS profile，见 index.tsx loadNames）
+export const AGENT_LABEL = 'Agent'
+export const OWNER_LABEL = 'Owner'
 export const STORE_URL = 'https://compliancehub.cn/store/'
 
-// 双面板号码（同页两部电话演示）；A/B 可由环境变量覆盖
+// 双面板线路号（同页两部电话演示）；由 node 半注入，注入缺失时为空（未配置）
 export const MINE_NUM = {
-  A: process.env.DSH_PHONE_NUM_A || '+86 95123 0001',
-  B: process.env.DSH_PHONE_NUM_B || '+86 95123 0002',
+  A: INJ.numA || '',
+  B: INJ.numB || '',
 } as Record<'A' | 'B', string>
 export const PEER_NUM = { A: MINE_NUM.B, B: MINE_NUM.A } as Record<'A' | 'B', string>
 export const NUM_A = MINE_NUM.A.replace(/[^0-9+]/g, '')
 export const NUM_B = MINE_NUM.B.replace(/[^0-9+]/g, '')
 
-// 本地存储 key
+// 本地存储 key（设备态；将来按 agent DID 命名空间化以支持多账号零痕迹）
 export const THEME_KEY = 'dsh-phone-theme'
 export const UNLOCKED_KEY = 'dsh-phone-unlocked'
 export const NOTE_KEY = 'dsh-phone-note'

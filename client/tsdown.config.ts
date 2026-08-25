@@ -40,14 +40,8 @@ const client: UserConfig = {
     'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV ?? 'production'),
     'import.meta.env.MODE': JSON.stringify(process.env.NODE_ENV ?? 'production'),
     'import.meta.env': JSON.stringify({ MODE: process.env.NODE_ENV ?? 'production' }),
-    // dsh-phone 环境变量（构建时注入；缺省空串 → config.ts 回退缺省值，行为不变）
-    'process.env.DSH_PHONE_BASE': JSON.stringify(process.env.DSH_PHONE_BASE ?? ''),
-    'process.env.DSH_PHONE_DID': JSON.stringify(process.env.DSH_PHONE_DID ?? ''),
-    'process.env.DSH_PHONE_NUM_A': JSON.stringify(process.env.DSH_PHONE_NUM_A ?? ''),
-    'process.env.DSH_PHONE_NUM_B': JSON.stringify(process.env.DSH_PHONE_NUM_B ?? ''),
-    'process.env.DSH_PHONE_OWNER_DID': JSON.stringify(process.env.DSH_PHONE_OWNER_DID ?? ''),
-    'process.env.DSH_PHONE_AGENT_LABEL': JSON.stringify(process.env.DSH_PHONE_AGENT_LABEL ?? ''),
-    'process.env.DSH_PHONE_OWNER_LABEL': JSON.stringify(process.env.DSH_PHONE_OWNER_LABEL ?? ''),
+    // 身份/线路号/端点不再构建时注入（配置运行时化）：node 半经 tapIndex 注入
+    // window.__DSH_PHONE_CONFIG__，client 半 config.ts 读全局。这里只保留真正的构建期值。
   },
   outputOptions: {
     entryFileNames: 'client.js',
