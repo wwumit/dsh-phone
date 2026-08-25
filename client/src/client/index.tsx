@@ -153,6 +153,23 @@ interface SmsMsg {
   seq?: number
 }
 
+// 共享身份/开户状态（A=agent、B=owner 同属一个主体 → 归 PhoneOverlay 统一持有，双面板共享）
+type AccountState = {
+  numbers: string[]
+  applying: boolean
+  done: string | null
+  err: string
+  credits: number
+  welcome: number
+  agentState: string
+  agentLevel: number
+  agentLevelName: string
+  registering: boolean
+  ownerState: string
+  ownerName: string
+  ownerRegistering: boolean
+}
+
 function PhonePanel(props: {
   id: 'A' | 'B'
   label: string
@@ -190,6 +207,14 @@ function PhonePanel(props: {
   pos: { x: number; y: number }
   onDragStart(e: React.PointerEvent): void
   justDragged: boolean
+  // 共享身份/开户（由 PhoneOverlay 持有，双面板共享）
+  account: AccountState
+  checkAgentRegistered(): void
+  registerAgent(displayName: string, author: string): Promise<void>
+  checkOwnerRegistered(): void
+  registerOwner(displayName: string, author: string): Promise<void>
+  loadAccount(): void
+  applyAccount(displayName?: string): Promise<void>
 }): JSX.Element {
   const t = props.theme
   const [open, setOpen] = useState(false)
@@ -209,7 +234,6 @@ function PhonePanel(props: {
   const [contactsErr, setContactsErr] = useState('')
   const [agents, setAgents] = useState<Array<{ agentDid: string; name: string; level: number; numbers: string[] }> | null>(null)
   const [usage, setUsage] = useState<any>(null)
-  const [account, setAccount] = useState<{ numbers: string[]; applying: boolean; done: string | null; err: string; credits: number; welcome: number; agentState: string; agentLevel: number; agentLevelName: string; registering: boolean; ownerState: string; ownerName: string; ownerRegistering: boolean }>({ numbers: [], applying: false, done: null, err: '', credits: 0, welcome: 0, agentState: 'unknown', agentLevel: 0, agentLevelName: '', registering: false, ownerState: 'unknown', ownerName: '', ownerRegistering: false })
 
   // 来电强制唤起本面板
   const incoming = props.call && props.call.calleeId === props.id
@@ -227,93 +251,6 @@ function PhonePanel(props: {
     }
   }
 
-  /** 检测当前 AGENT_DID 是否已注册 + 等级（开户引导第一步） */
-  function checkAgentRegistered(): void {
-    fetch(`${PHONE_BASE}/api/v1/did/${encodeURIComponent(AGENT_DID)}`, { headers: { Accept: 'application/json' } })
-      .then((r) => r.json())
-      .then((d) => {
-        // DID Document 的标识字段是 id（不是 did）；registry /api/v1/did/<did> 返回 { id, metadata, ... }
-        if (d && (d.id === AGENT_DID || d.did === AGENT_DID)) {
-          const lvl = d.level ?? 0
-          setAccount((a) => ({ ...a, agentState: 'registered', agentLevel: lvl, agentLevelName: d.levelName || `L${lvl}`, err: '' }))
-        } else {
-          setAccount((a) => ({ ...a, agentState: 'unregistered', agentLevel: 0, agentLevelName: '', err: '' }))
-        }
-      })
-      .catch(() => setAccount((a) => ({ ...a, agentState: 'unregistered', err: '无法确认 agent 状态' })))
-  }
-
-  /** 注册 agent（名字 + author → L 等级；author 决定能否过信任门禁） */
-  async function registerAgent(displayName: string, author: string): Promise<void> {
-    setAccount((a) => ({ ...a, registering: true, err: '' }))
-    try {
-      // 1. 注册身份主体
-      const r1 = await fetch(`${PHONE_BASE}/api/v1/register`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'agent', id: AGENT_DID.replace(/^did:cha2a:agent:/, ''), metadata: { name: displayName, author } }),
-      })
-      const d1 = await r1.json()
-      if (r1.status !== 201) {
-        // 已存在则尝试补 metadata（升级 author → L2）
-        if (r1.status === 409 && author) {
-          await fetch(`${PHONE_BASE}/api/v1/update`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type: 'agent', id: AGENT_DID.replace(/^did:cha2a:agent:/, ''), metadata: { author } }),
-          })
-        } else {
-          setAccount((a) => ({ ...a, registering: false, err: d1.error || 'agent 注册失败' }))
-          return
-        }
-      }
-      // 2. 重新确认状态
-      checkAgentRegistered()
-      setAccount((a) => ({ ...a, registering: false, done: AGENT_DID }))
-    } catch { setAccount((a) => ({ ...a, registering: false, err: '网络错误' })) }
-  }
-
-  /** 检测 Owner 身份（did:cha2a:user:<agent短名>-owner）是否已注册 + 注册名 */
-  function checkOwnerRegistered(): void {
-    if (!OWNER_DID) { setAccount((a) => ({ ...a, ownerState: 'unregistered', ownerName: '' })); return }
-    fetch(`${PHONE_BASE}/api/v1/did/${encodeURIComponent(OWNER_DID)}`, { headers: { Accept: 'application/json' } })
-      .then((r) => r.json())
-      .then((d) => {
-        if (d && d.id === OWNER_DID) {
-          const meta = d.metadata || {}
-          setAccount((a) => ({ ...a, ownerState: 'registered', ownerName: meta.name || OWNER_DID.split(':').pop() || '', err: '' }))
-        } else {
-          setAccount((a) => ({ ...a, ownerState: 'unregistered', ownerName: '' }))
-        }
-      })
-      .catch(() => setAccount((a) => ({ ...a, ownerState: 'unregistered', err: '无法确认 Owner 状态' })))
-  }
-
-  /** 注册 Owner 身份（名字 + 主体名 → L2；owner 有明确身份才能在群里发言） */
-  async function registerOwner(displayName: string, author: string): Promise<void> {
-    if (!OWNER_DID) { setAccount((a) => ({ ...a, err: '本环境未配置 Owner DID' })); return }
-    setAccount((a) => ({ ...a, ownerRegistering: true, err: '' }))
-    try {
-      const short = OWNER_DID.split(':').pop() || ''
-      const r1 = await fetch(`${PHONE_BASE}/api/v1/register`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'user', id: short, metadata: { name: displayName, author } }),
-      })
-      const d1 = await r1.json()
-      if (r1.status !== 201) {
-        if (r1.status === 409 && author) {
-          await fetch(`${PHONE_BASE}/api/v1/update`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type: 'user', id: short, metadata: { author } }),
-          })
-        } else {
-          setAccount((a) => ({ ...a, ownerRegistering: false, err: d1.error || 'Owner 注册失败' }))
-          return
-        }
-      }
-      checkOwnerRegistered()
-      setAccount((a) => ({ ...a, ownerRegistering: false, done: OWNER_DID }))
-    } catch { setAccount((a) => ({ ...a, ownerRegistering: false, err: '网络错误' })) }
-  }
-
   /** 拉取所有已注册 agent（含无号码的，建群选人用） */
   function loadAgents(): void {
     if (!agents) {
@@ -322,37 +259,6 @@ function PhonePanel(props: {
         .then((d) => setAgents(d.agents || []))
         .catch(() => {})
     }
-  }
-
-  function loadAccount(): void {
-    fetch(`${PHONE_BASE}/api/v1/phone/lookup?did=${encodeURIComponent(AGENT_DID)}`, { headers: { Accept: 'application/json' } })
-      .then((r) => r.json())
-      .then((d) => { setAccount((a) => ({ ...a, numbers: d.numbers || [], done: null, err: '' })) })
-      .catch(() => {})
-    fetch(`${PHONE_BASE}/api/v1/phone/credits?did=${encodeURIComponent(AGENT_DID)}`, { headers: { Accept: 'application/json' } })
-      .then((r) => r.json())
-      .then((d) => { setAccount((a) => ({ ...a, credits: d.credits || 0 })) })
-      .catch(() => {})
-    checkAgentRegistered()
-    checkOwnerRegistered()
-  }
-  async function applyAccount(displayName = ''): Promise<void> {
-    setAccount((a) => ({ ...a, applying: true, err: '' }))
-    try {
-      const r = await fetch(`${PHONE_BASE}/api/v1/phone/apply`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ agentDid: AGENT_DID, displayName, consent: true }),
-      })
-      const d = await r.json()
-      if (r.status === 201) {
-        setAccount((a) => ({ ...a, numbers: [...a.numbers, d.number], done: d.number, welcome: d.welcomeCredits || 0, credits: (a.credits || 0) + (d.welcomeCredits || 0), applying: false }))
-      } else if (r.status === 409 && /agent not registered/i.test(d.error || '')) {
-        // 未注册 agent → 转引导注册（不报硬错误）
-        setAccount((a) => ({ ...a, applying: false, agentState: 'unregistered', err: '请先注册你的 agent（下方第 1 步）' }))
-      } else {
-        setAccount((a) => ({ ...a, err: d.error || '申请失败', applying: false }))
-      }
-    } catch { setAccount((a) => ({ ...a, err: '网络错误', applying: false })) }
   }
 
   function loadUsage(): void {
@@ -397,7 +303,7 @@ function PhonePanel(props: {
     smsList: props.smsList,
     group: props.group,
     contacts, contactsErr, agents,
-    account, usage,
+    account: props.account, usage,
     theme: t, unlocked: props.unlocked,
     call: props.call,
   }
@@ -405,7 +311,7 @@ function PhonePanel(props: {
     nav, back,
     sendSms: (from, text, attachment, to) => props.onSendSms(from, text, attachment, to),
     sendGroup: (from, text) => props.group.onSend(from, text),
-    loadContacts, loadAgents, loadAccount, loadUsage,
+    loadContacts, loadAgents, loadAccount: props.loadAccount, loadUsage,
     loadGroupList: () => props.group.onLoadList(),
     openGroup: (gid) => props.group.onOpen(gid),
     leaveGroup: (gid, member) => props.group.onLeave(gid, member),
@@ -413,11 +319,11 @@ function PhonePanel(props: {
     setAnnouncement: (gid, text) => props.group.onAnnouncement(gid, text),
     createGroup: (name, members) => props.group.onCreate(name, members),
     groupBack: () => props.group.onBack(),
-    applyAccount,
-    registerAgent,
-    checkAgentRegistered,
-    registerOwner,
-    checkOwnerRegistered,
+    applyAccount: props.applyAccount,
+    registerAgent: props.registerAgent,
+    checkAgentRegistered: props.checkAgentRegistered,
+    registerOwner: props.registerOwner,
+    checkOwnerRegistered: props.checkOwnerRegistered,
     dial: (fromId, num) => props.onDial(fromId, num),
     answer: () => props.onAnswer(),
     hangup,
@@ -534,6 +440,130 @@ function PhoneOverlay(): JSX.Element {
   // ── 浮标显示名（注册名优先；无则通用占位——不硬编码任何主人专属名）──
   // A 面板 = agent 注册名（metadata.name）；B 面板 = owner 注册名（metadata.name）→ 号码 displayName → 占位
   const [dispName, setDispName] = useState<{ a: string; b: string }>({ a: AGENT_LABEL, b: OWNER_LABEL })
+
+  // ── 共享身份/开户状态（A=agent、B=owner 同属一个主体 → 归 PhoneOverlay 持有，双面板共享）──
+  // 之前误放在 PhonePanel（每面板独立）导致 sendGroup/sendSms 在 PhoneOverlay 引用 account 越界 → ReferenceError → 发消息静默失败
+  const [account, setAccount] = useState<AccountState>({ numbers: [], applying: false, done: null, err: '', credits: 0, welcome: 0, agentState: 'unknown', agentLevel: 0, agentLevelName: '', registering: false, ownerState: 'unknown', ownerName: '', ownerRegistering: false })
+
+  /** 检测当前 AGENT_DID 是否已注册 + 等级（开户引导第一步） */
+  function checkAgentRegistered(): void {
+    fetch(`${PHONE_BASE}/api/v1/did/${encodeURIComponent(AGENT_DID)}`, { headers: { Accept: 'application/json' } })
+      .then((r) => r.json())
+      .then((d) => {
+        // DID Document 的标识字段是 id（不是 did）；registry /api/v1/did/<did> 返回 { id, metadata, ... }
+        if (d && (d.id === AGENT_DID || d.did === AGENT_DID)) {
+          const lvl = d.level ?? 0
+          setAccount((a) => ({ ...a, agentState: 'registered', agentLevel: lvl, agentLevelName: d.levelName || `L${lvl}`, err: '' }))
+        } else {
+          setAccount((a) => ({ ...a, agentState: 'unregistered', agentLevel: 0, agentLevelName: '', err: '' }))
+        }
+      })
+      .catch(() => setAccount((a) => ({ ...a, agentState: 'unregistered', err: '无法确认 agent 状态' })))
+  }
+
+  /** 注册 agent（名字 + author → L 等级；author 决定能否过信任门禁） */
+  async function registerAgent(displayName: string, author: string): Promise<void> {
+    setAccount((a) => ({ ...a, registering: true, err: '' }))
+    try {
+      // 1. 注册身份主体
+      const r1 = await fetch(`${PHONE_BASE}/api/v1/register`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'agent', id: AGENT_DID.replace(/^did:cha2a:agent:/, ''), metadata: { name: displayName, author } }),
+      })
+      const d1 = await r1.json()
+      if (r1.status !== 201) {
+        // 已存在则尝试补 metadata（升级 author → L2）
+        if (r1.status === 409 && author) {
+          await fetch(`${PHONE_BASE}/api/v1/update`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'agent', id: AGENT_DID.replace(/^did:cha2a:agent:/, ''), metadata: { author } }),
+          })
+        } else {
+          setAccount((a) => ({ ...a, registering: false, err: d1.error || 'agent 注册失败' }))
+          return
+        }
+      }
+      // 2. 重新确认状态
+      checkAgentRegistered()
+      setAccount((a) => ({ ...a, registering: false, done: AGENT_DID }))
+    } catch { setAccount((a) => ({ ...a, registering: false, err: '网络错误' })) }
+  }
+
+  /** 检测 Owner 身份（did:cha2a:user:<agent短名>-owner）是否已注册 + 注册名 */
+  function checkOwnerRegistered(): void {
+    if (!OWNER_DID) { setAccount((a) => ({ ...a, ownerState: 'unregistered', ownerName: '' })); return }
+    fetch(`${PHONE_BASE}/api/v1/did/${encodeURIComponent(OWNER_DID)}`, { headers: { Accept: 'application/json' } })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d && d.id === OWNER_DID) {
+          const meta = d.metadata || {}
+          setAccount((a) => ({ ...a, ownerState: 'registered', ownerName: meta.name || OWNER_DID.split(':').pop() || '', err: '' }))
+        } else {
+          setAccount((a) => ({ ...a, ownerState: 'unregistered', ownerName: '' }))
+        }
+      })
+      .catch(() => setAccount((a) => ({ ...a, ownerState: 'unregistered', err: '无法确认 Owner 状态' })))
+  }
+
+  /** 注册 Owner 身份（名字 + 主体名 → L2；owner 有明确身份才能在群里发言） */
+  async function registerOwner(displayName: string, author: string): Promise<void> {
+    if (!OWNER_DID) { setAccount((a) => ({ ...a, err: '本环境未配置 Owner DID' })); return }
+    setAccount((a) => ({ ...a, ownerRegistering: true, err: '' }))
+    try {
+      const short = OWNER_DID.split(':').pop() || ''
+      const r1 = await fetch(`${PHONE_BASE}/api/v1/register`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'user', id: short, metadata: { name: displayName, author } }),
+      })
+      const d1 = await r1.json()
+      if (r1.status !== 201) {
+        if (r1.status === 409 && author) {
+          await fetch(`${PHONE_BASE}/api/v1/update`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'user', id: short, metadata: { author } }),
+          })
+        } else {
+          setAccount((a) => ({ ...a, ownerRegistering: false, err: d1.error || 'Owner 注册失败' }))
+          return
+        }
+      }
+      checkOwnerRegistered()
+      setAccount((a) => ({ ...a, ownerRegistering: false, done: OWNER_DID }))
+    } catch { setAccount((a) => ({ ...a, ownerRegistering: false, err: '网络错误' })) }
+  }
+
+  function loadAccount(): void {
+    fetch(`${PHONE_BASE}/api/v1/phone/lookup?did=${encodeURIComponent(AGENT_DID)}`, { headers: { Accept: 'application/json' } })
+      .then((r) => r.json())
+      .then((d) => { setAccount((a) => ({ ...a, numbers: d.numbers || [], done: null, err: '' })) })
+      .catch(() => {})
+    fetch(`${PHONE_BASE}/api/v1/phone/credits?did=${encodeURIComponent(AGENT_DID)}`, { headers: { Accept: 'application/json' } })
+      .then((r) => r.json())
+      .then((d) => { setAccount((a) => ({ ...a, credits: d.credits || 0 })) })
+      .catch(() => {})
+    checkAgentRegistered()
+    checkOwnerRegistered()
+  }
+
+  async function applyAccount(displayName = ''): Promise<void> {
+    setAccount((a) => ({ ...a, applying: true, err: '' }))
+    try {
+      const r = await fetch(`${PHONE_BASE}/api/v1/phone/apply`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentDid: AGENT_DID, displayName, consent: true }),
+      })
+      const d = await r.json()
+      if (r.status === 201) {
+        setAccount((a) => ({ ...a, numbers: [...a.numbers, d.number], done: d.number, welcome: d.welcomeCredits || 0, credits: (a.credits || 0) + (d.welcomeCredits || 0), applying: false }))
+      } else if (r.status === 409 && /agent not registered/i.test(d.error || '')) {
+        // 未注册 agent → 转引导注册（不报硬错误）
+        setAccount((a) => ({ ...a, applying: false, agentState: 'unregistered', err: '请先注册你的 agent（下方第 1 步）' }))
+      } else {
+        setAccount((a) => ({ ...a, err: d.error || '申请失败', applying: false }))
+      }
+    } catch { setAccount((a) => ({ ...a, err: '网络错误', applying: false })) }
+  }
+
   React.useEffect(() => {
     let alive = true
     const load = async () => {
@@ -642,10 +672,12 @@ function PhoneOverlay(): JSX.Element {
     // B 面板：owner 已注册 → 用 OWNER_DID；未注册 → 回退号码身份（号码在簿即身份，OWNER_DID 预留）
     const panelIsB = from === 'B'
     const ownerRegistered = account.ownerState === 'registered'
-    const speakAs = panelIsB ? (ownerRegistered && OWNER_DID ? OWNER_DID : MINE_NUM.B) : AGENT_DID
-    const speakNumber = panelIsB ? (ownerRegistered && OWNER_DID ? OWNER_DID : MINE_NUM.B) : MINE_NUM.A
+    const normNum = (s: string) => s.replace(/^\+86/, '').replace(/[^0-9]/g, '')
+    // B 面板号码身份用归一化号码 NUM_B（无空格）——后端 PHONE_RE 不认带空格号码（MINE_NUM.B 会 400 invalid from）
+    const speakAs = panelIsB ? (ownerRegistered && OWNER_DID ? OWNER_DID : NUM_B) : AGENT_DID
+    const speakNumber = panelIsB ? (ownerRegistered && OWNER_DID ? OWNER_DID : NUM_B) : MINE_NUM.A
     // 身份守卫：身份不明不能参与群聊——A 查 agent 注册、B 查 owner 注册（owner 未注册用号码，号码在簿即身份）
-    if (panelIsB ? (account.ownerState === 'unregistered' && !account.numbers.includes(MINE_NUM.B)) : (account.agentState === 'unregistered')) {
+    if (panelIsB ? (account.ownerState === 'unregistered' && !account.numbers.some((n) => normNum(n) === normNum(NUM_B))) : (account.agentState === 'unregistered')) {
       res.error = panelIsB
         ? '⚠ Owner 身份未注册，且号码未开户，不能在群里发言。请先打开「开户」完成注册'
         : '⚠ 身份未注册，不能在群里发言。请先打开「开户」完成 agent 注册（第 1 步）'
@@ -667,7 +699,6 @@ function PhoneOverlay(): JSX.Element {
       }
     } catch {}
     // 成员校验：@ 目标必须是群成员（agent 短名/昵称 → 成员 DID；号码按 +86 归一）
-    const normNum = (s: string) => s.replace(/^\+86/, '').replace(/[^0-9]/g, '')
     const notInGroup = mentions.filter((name) => {
       const member = nickToMember[name] || name
       return !(currentGroup.members || []).some((mm) =>
@@ -1198,10 +1229,10 @@ function PhoneOverlay(): JSX.Element {
     <>
       <PhonePanel id="A" label={`${dispName.a} · ${MINE_NUM.A}`} floatLabel={dispName.a} ownNumber={MINE_NUM.A} otherNumber={PEER_NUM.A}
         badgeLevel={3} smsList={smsLog} onSendSms={sendSms} voice={voiceFace}
-        group={{ list: groupList, current: currentGroup, msgs: groupMsgLog, onLoadList: loadGroupList, onCreate: createGroup, onOpen: (gid) => { setCurrentGroup(null); setGroupMsgLog([]); return openGroup(gid) }, onSend: sendGroup, onLeave: leaveGroup, onDisband: disbandGroup, onAnnouncement: setAnnouncement, onBack: () => { setCurrentGroup(null); setGroupMsgLog([]) } }} onReport={reportUsage} theme={themeOf('A')} unlocked={unlocked} onUnlock={onUnlock} onSelectTheme={(n) => onSelectTheme('A', n)} top={topPanel === 'A'} onFocus={() => setTopPanel('A')} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} pos={pos.A} onDragStart={(e) => startDrag('A', e)} justDragged={justDragged} />
+        group={{ list: groupList, current: currentGroup, msgs: groupMsgLog, onLoadList: loadGroupList, onCreate: createGroup, onOpen: (gid) => { setCurrentGroup(null); setGroupMsgLog([]); return openGroup(gid) }, onSend: sendGroup, onLeave: leaveGroup, onDisband: disbandGroup, onAnnouncement: setAnnouncement, onBack: () => { setCurrentGroup(null); setGroupMsgLog([]) } }} onReport={reportUsage} theme={themeOf('A')} unlocked={unlocked} onUnlock={onUnlock} onSelectTheme={(n) => onSelectTheme('A', n)} top={topPanel === 'A'} onFocus={() => setTopPanel('A')} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} pos={pos.A} onDragStart={(e) => startDrag('A', e)} justDragged={justDragged} account={account} checkAgentRegistered={checkAgentRegistered} registerAgent={registerAgent} checkOwnerRegistered={checkOwnerRegistered} registerOwner={registerOwner} loadAccount={loadAccount} applyAccount={applyAccount} />
       <PhonePanel id="B" label={`${dispName.b} · ${MINE_NUM.B}`} floatLabel={dispName.b} ownNumber={MINE_NUM.B} otherNumber={PEER_NUM.B}
         badgeLevel={3} smsList={smsLog} onSendSms={sendSms} voice={voiceFace}
-        group={{ list: groupList, current: currentGroup, msgs: groupMsgLog, onLoadList: loadGroupList, onCreate: createGroup, onOpen: (gid) => { setCurrentGroup(null); setGroupMsgLog([]); return openGroup(gid) }, onSend: sendGroup, onLeave: leaveGroup, onDisband: disbandGroup, onAnnouncement: setAnnouncement, onBack: () => { setCurrentGroup(null); setGroupMsgLog([]) } }} onReport={reportUsage} theme={themeOf('B')} unlocked={unlocked} onUnlock={onUnlock} onSelectTheme={(n) => onSelectTheme('B', n)} top={topPanel === 'B'} onFocus={() => setTopPanel('B')} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} pos={pos.B} onDragStart={(e) => startDrag('B', e)} justDragged={justDragged} />
+        group={{ list: groupList, current: currentGroup, msgs: groupMsgLog, onLoadList: loadGroupList, onCreate: createGroup, onOpen: (gid) => { setCurrentGroup(null); setGroupMsgLog([]); return openGroup(gid) }, onSend: sendGroup, onLeave: leaveGroup, onDisband: disbandGroup, onAnnouncement: setAnnouncement, onBack: () => { setCurrentGroup(null); setGroupMsgLog([]) } }} onReport={reportUsage} theme={themeOf('B')} unlocked={unlocked} onUnlock={onUnlock} onSelectTheme={(n) => onSelectTheme('B', n)} top={topPanel === 'B'} onFocus={() => setTopPanel('B')} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} pos={pos.B} onDragStart={(e) => startDrag('B', e)} justDragged={justDragged} account={account} checkAgentRegistered={checkAgentRegistered} registerAgent={registerAgent} checkOwnerRegistered={checkOwnerRegistered} registerOwner={registerOwner} loadAccount={loadAccount} applyAccount={applyAccount} />
     </>
   )
 }
