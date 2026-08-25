@@ -25,6 +25,8 @@ const AGENT_DID = env('DSH_PHONE_DID', 'did:cha2a:agent:dshlib')
 const AGENT_SHORT = AGENT_DID.split(':').pop() || 'dshlib'
 // 本环境号码（node 半回短信/群的兜底 fromNumber；运行时读 env，缺省同演示配置）
 const NUM_A = env('DSH_PHONE_NUM_A', '+86 95123 0001').replace(/[^0-9+]/g, '')
+// 号码归一化（与 client 半 sendGroup 的 normNum 一致：去 +86 前缀 + 非数字）
+function normNum(s: string): string { return String(s || '').replace(/^\+86/, '').replace(/[^0-9]/g, '') }
 const REPLY_INTERVAL = 2500          // 轮询间隔（回复路由时延大头，2.5s）
 const SEEN_MAX = 200                 // 已处理消息去重上限
 // 轮询游标持久化：重启后不重放历史回复（游标按 sid 记录已处理消息数；inbox 记录收件箱 seq）
@@ -152,6 +154,7 @@ export function apply(ctx: Context): void {
   // 投递与实例解耦：任何实例 @ 本 agent，消息进收件箱，由本实例 node 半处理
   let ownNickname = ''
   let ownLevel = 0
+  let ownNumbers: string[] = [normNum(NUM_A)]
   async function refreshNickname(): Promise<void> {
     try {
       const d = await (await fetch(`${PHONE_BASE}/api/v1/did/${AGENT_DID}`, { headers: { Accept: 'application/json' } })).json()
@@ -159,6 +162,12 @@ export function apply(ctx: Context): void {
       // 等级在 trust/query 端点（did 文档顶层无 level）
       const t = await (await fetch(`${PHONE_BASE}/api/v1/trust/query?did=${encodeURIComponent(AGENT_DID)}`, { headers: { Accept: 'application/json' } })).json()
       ownLevel = Number(t?.level ?? t?.trust?.level) || 0
+      // 拉名下所有号码（识别 @号码 点名：群成员常按号码存，@号码也应触发本 agent）
+      try {
+        const dir = await (await fetch(`${PHONE_BASE}/api/v1/phone/directory`, { headers: { Accept: 'application/json' } })).json()
+        ownNumbers = (dir?.numbers || []).filter((n: any) => n.agentDid === AGENT_DID).map((n: any) => normNum(n.number))
+        if (!ownNumbers.length) ownNumbers = [normNum(NUM_A)]
+      } catch { ownNumbers = [normNum(NUM_A)] }
     } catch { /* 静默 */ }
   }
   // 解析有效会话：主会话可能已过期（重启后 session id 变），主失败则遍历 alternatives
@@ -177,11 +186,16 @@ export function apply(ctx: Context): void {
     }
     return null
   }
-  // 群消息是否 @ 自己（短名 或 昵称）
+  // 群消息是否 @ 自己（短名 / 昵称 / 名下号码）
   function isMentionedMe(text: string): boolean {
     if (!text) return false
     if (text.includes(`@${AGENT_SHORT}`)) return true
     if (ownNickname && text.includes(`@${ownNickname}`)) return true
+    // @号码：群成员常按号码存（@951230006 等），号码即本 agent 身份 → 也触发
+    for (const m of text.matchAll(/@([\w\u4e00-\u9fa5.-]+)/g)) {
+      const nn = normNum(m[1])
+      if (nn && ownNumbers.includes(nn)) return true
+    }
     return false
   }
   // 注入会话（session.prompt RPC，loopback 信任通过）：触发 AI 生成回复
