@@ -36,6 +36,12 @@ export function apply(ctx: Context): void {
   // ── Agent 回复转回：读绑定会话最新 assistant 消息 → 按来源路由回电话 ──
   const seen = new Set<string>()
   let lastChecked: Record<string, number> = loadCursor()
+  // 状态日志节流：静默状态（无会话/无绑定）每 50 次轮询（~2 分钟）打一条，避免刷屏淹没有用信息
+  let quietLogCount = 0
+  function quietLog(msg: string): void {
+    quietLogCount++
+    if (quietLogCount >= 50) { quietLogCount = 0; console.log(`[dsh-phone] ${msg}`) }
+  }
 
   // 解析 <dsh-phone>{json}</dsh-phone> 来源标记（返回 null 表示无标记）
   function parseSource(text: string): { source: string; fromNumber: string; conversationId?: string; groupId?: string } | null {
@@ -70,13 +76,13 @@ export function apply(ctx: Context): void {
       const loc = await (await fetch(`${PHONE_BASE}/api/v1/agent/locate?did=${encodeURIComponent(AGENT_DID)}`, {
         headers: { Accept: 'application/json' },
       })).json()
-      if (!loc || !loc.bound) { console.log('[dsh-phone] poll: 无绑定会话'); return }
+      if (!loc || !loc.bound) { quietLog('poll: 无绑定会话（状态日志每~2分钟一条）'); return }
       const sid = await resolveSession(loc)
-      if (!sid) { console.log('[dsh-phone] poll: 无有效会话（主+alternatives 均失效）'); return }
+      if (!sid) { quietLog('poll: 无有效会话（主+alternatives 均失效，状态日志每~2分钟一条）'); return }
 
       // 2. 读会话消息序列（含 user 来源标记 + assistant 回复）
       const session = await (ctx as any).sessionQuery?.readSession?.(sid)
-      if (!session) { console.log('[dsh-phone] poll: readSession 失败', sid); return }
+      if (!session) { quietLog('poll: readSession 失败（状态日志每~2分钟一条）'); return }
       const events = (session as any).events || []
       const msgs = extractMessages(events)
 
