@@ -40,7 +40,7 @@ export function UsageApp(p: AppProps): JSX.Element {
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <AppBar title="电话用量" onBack={back} theme={t} />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: 10, minHeight: 0, overflowY: 'auto' }}>
-        <div style={{ fontSize: 11, color: t.sub }}>📊 dshlib Agent Line</div>
+        <div style={{ fontSize: 11, color: t.sub }}>📊 电话用量</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, width: '100%' }}>
           {[
             ['📞 通话', usage ? ((usage.callSeconds / 60).toFixed(1)) + ' 分' : '—'],

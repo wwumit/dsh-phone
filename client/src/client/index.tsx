@@ -125,18 +125,12 @@ export function apply(ctx: ClientContext): void {
       available: () => true,
       ui: {
         kind: 'popupSelect',
+        // 只保留打开拨号盘；不硬编码任何环境专属联系人（清除残留测试终端 dshlib/term-a/term-b，避免所有环境出现别人的号码）
         options: async () => [
           { id: 'open', label: '📞 打开拨号盘' },
-          { id: 'dshlib', label: '拨打 dshlib Agent Line', detail: '+86 95123 0001' },
-          { id: 'term-a', label: '拨打 term-a（测试终端）', detail: '+86 95123 0030' },
-          { id: 'term-b', label: '拨打 term-b（测试终端）', detail: '+86 95123 0031' },
         ],
         onSelect: (opt) => {
-          const direct: Record<string, string> = {
-            dshlib: '+86951230001', 'term-a': '+86951230030', 'term-b': '+86951230031',
-          }
           if (opt.id === 'open') store.set({ open: true, number: store.getSnapshot().number })
-          else if (direct[opt.id]) store.set({ open: true, number: direct[opt.id] })
         },
       },
     })
