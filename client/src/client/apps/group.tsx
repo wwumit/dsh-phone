@@ -6,7 +6,7 @@
 import React, { useState } from 'react'
 import { type AppProps } from '../apps'
 import { AppBar } from '../theme'
-import { PHONE_BASE, AGENT_DID } from '../config'
+import { PHONE_BASE, RCS_BASE, AGENT_DID } from '../config'
 
 // 群已读游标（localStorage：groupId → 已读 seq；未读数 = lastMsgSeq - readSeq）
 const READ_KEY = 'dsh-phone-group-read'
@@ -164,7 +164,7 @@ export function GroupChatApp(p: AppProps): JSX.Element {
 
   // 拉取成员详情（昵称/类型/等级）→ 建映射（member 原文 → 呈现信息）
   React.useEffect(() => {
-    fetch(`${PHONE_BASE}/api/v1/phone/group/${cur.groupId}/members-detail`, { headers: { Accept: 'application/json' } })
+    fetch(`${RCS_BASE}/api/v1/phone/group/${cur.groupId}/members-detail`, { headers: { Accept: 'application/json' } })
       .then((r) => r.json())
       .then((d) => {
         if (d && d.members) {
@@ -385,7 +385,7 @@ export function GroupInfoApp(p: AppProps): JSX.Element {
 
   // 拉成员详情（昵称/类型/等级）
   React.useEffect(() => {
-    fetch(`${PHONE_BASE}/api/v1/phone/group/${cur.groupId}/members-detail`, { headers: { Accept: 'application/json' } })
+    fetch(`${RCS_BASE}/api/v1/phone/group/${cur.groupId}/members-detail`, { headers: { Accept: 'application/json' } })
       .then((r) => r.json())
       .then((d) => {
         if (d && d.members) {
@@ -402,7 +402,7 @@ export function GroupInfoApp(p: AppProps): JSX.Element {
   function addMembers(): void {
     if (!addPick.length) return
     addPick.forEach((m) => {
-      fetch(`${PHONE_BASE}/api/v1/phone/group/member`, {
+      fetch(`${RCS_BASE}/api/v1/phone/group/member`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ groupId: cur.groupId, member: m }),
       }).then((r) => r.json()).then((d) => {
@@ -414,7 +414,7 @@ export function GroupInfoApp(p: AppProps): JSX.Element {
   }
   // 移除成员
   function removeMember(member: string): void {
-    fetch(`${PHONE_BASE}/api/v1/phone/group/member?groupId=${cur.groupId}&member=${encodeURIComponent(member)}`, {
+    fetch(`${RCS_BASE}/api/v1/phone/group/member?groupId=${cur.groupId}&member=${encodeURIComponent(member)}`, {
       method: 'DELETE',
     }).then((r) => r.json()).then((d) => {
       if (d && d.ok) { setMsg(`已移除 ${member}`); actions.loadGroupList() }

@@ -13,6 +13,9 @@
 declare const process: any
 
 export const PHONE_BASE = process.env.DSH_PHONE_BASE || 'https://compliancehub.cn'
+// RCS 服务基址（微信类比）：消息/群/附件走独立的 rcs-server，经 nginx /rcs/ 前缀路由
+// 网关/身份端点（resolve/lookup/directory/apply/credits/agent 等）仍走 PHONE_BASE（registry）
+export const RCS_BASE = PHONE_BASE + '/rcs'
 export const AGENT_DID = process.env.DSH_PHONE_DID || 'did:cha2a:agent:dshlib'   // 电话对应的 agent 身份（号码簿绑定）
 
 // Owner 终端身份（2.0）：owner 也注册独立 DID（did:cha2a:user:<agent短名>-owner），

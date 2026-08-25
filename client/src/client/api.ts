@@ -3,7 +3,7 @@
  * - 所有 fetch 集中于此，统一超时/错误归一/JSON 解析
  * - 各 App / PhoneOverlay 通过 api.* 访问，不再散落 fetch
  */
-import { PHONE_BASE, AGENT_DID } from './config'
+import { PHONE_BASE, RCS_BASE, AGENT_DID } from './config'
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message) }
@@ -12,10 +12,19 @@ export class ApiError extends Error {
 const TIMEOUT = 12000
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  return reqBase<T>(PHONE_BASE, path, init)
+}
+
+// RCS 业务端点（消息/群/附件）走 rcs-server
+async function reqRcs<T>(path: string, init?: RequestInit): Promise<T> {
+  return reqBase<T>(RCS_BASE, path, init)
+}
+
+async function reqBase<T>(base: string, path: string, init?: RequestInit): Promise<T> {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT)
   try {
-    const r = await fetch(`${PHONE_BASE}${path}`, { ...init, signal: ctrl.signal, headers: { Accept: 'application/json', ...(init?.headers || {}) } })
+    const r = await fetch(`${base}${path}`, { ...init, signal: ctrl.signal, headers: { Accept: 'application/json', ...(init?.headers || {}) } })
     if (!r.ok) {
       let msg = `HTTP ${r.status}`
       try { const d = await r.json(); if (d?.error) msg = d.error } catch {}
@@ -56,30 +65,30 @@ export const api = {
   // ── 消息中继（短信/附件）──
   /** 发送短信 */
   sendMessage: (fromNumber: string, to: string, text?: string, attachment?: { fileId?: string; name?: string; size?: number; hash?: string }) =>
-    req<any>('/api/v1/phone/message', {
+    reqRcs<any>('/api/v1/phone/message', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ from: AGENT_DID, fromNumber, to, text, attachment }),
     }),
   /** 增量拉取收件箱（seq 游标） */
-  messages: (since = 0) => req<{ messages?: Array<any> }>(`/api/v1/phone/messages?did=${encodeURIComponent(AGENT_DID)}&since=${since}`),
+  messages: (since = 0) => reqRcs<{ messages?: Array<any> }>(`/api/v1/phone/messages?did=${encodeURIComponent(AGENT_DID)}&since=${since}`),
   /** 上传附件（base64）→ fileId */
   uploadAttachment: (name: string, mime: string, dataB64: string) =>
-    req<{ ok?: boolean; fileId?: string; hash?: string }>('/api/v1/phone/attachment', {
+    reqRcs<{ ok?: boolean; fileId?: string; hash?: string }>('/api/v1/phone/attachment', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ did: AGENT_DID, name, mime, data: dataB64 }),
     }),
 
   // ── RCS 群 ──
-  groupList: (did = AGENT_DID) => req<{ groups?: Array<{ groupId: string; name: string; memberCount: number }> }>(`/api/v1/phone/group/list?did=${encodeURIComponent(did)}`),
+  groupList: (did = AGENT_DID) => reqRcs<{ groups?: Array<{ groupId: string; name: string; memberCount: number }> }>(`/api/v1/phone/group/list?did=${encodeURIComponent(did)}`),
   groupCreate: (name: string, members: string[]) =>
-    req<{ ok?: boolean; groupId?: string }>('/api/v1/phone/group', {
+    reqRcs<{ ok?: boolean; groupId?: string }>('/api/v1/phone/group', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, creator: AGENT_DID, members }),
     }),
-  groupDetail: (groupId: string) => req<{ ok?: boolean; groupId: string; name: string; members?: string[]; conversationId?: string }>(`/api/v1/phone/group/${groupId}`),
-  groupMembersDetail: (groupId: string) => req<{ ok?: boolean; groupId: string; members?: Array<{ member: string; nickname: string; type: 'phone' | 'agent'; level: number }> }>(`/api/v1/phone/group/${groupId}/members-detail`),
+  groupDetail: (groupId: string) => reqRcs<{ ok?: boolean; groupId: string; name: string; members?: string[]; conversationId?: string }>(`/api/v1/phone/group/${groupId}`),
+  groupMembersDetail: (groupId: string) => reqRcs<{ ok?: boolean; groupId: string; members?: Array<{ member: string; nickname: string; type: 'phone' | 'agent'; level: number }> }>(`/api/v1/phone/group/${groupId}/members-detail`),
   groupMessage: (fromNumber: string, groupId: string, text: string) =>
-    req<any>('/api/v1/phone/group/message', {
+    reqRcs<any>('/api/v1/phone/group/message', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ from: AGENT_DID, fromNumber, groupId, text }),
     }),

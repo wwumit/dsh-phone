@@ -15,7 +15,7 @@ import React, { useRef, useState, useSyncExternalStore } from 'react'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
-import { PHONE_BASE, AGENT_DID, OWNER_DID, MINE_NUM, PEER_NUM, NUM_A, NUM_B, THEME_KEY, UNLOCKED_KEY, AGENT_LABEL, OWNER_LABEL } from './config'
+import { PHONE_BASE, RCS_BASE, AGENT_DID, OWNER_DID, MINE_NUM, PEER_NUM, NUM_A, NUM_B, THEME_KEY, UNLOCKED_KEY, AGENT_LABEL, OWNER_LABEL } from './config'
 import { THEMES, SF, type Theme } from './theme'
 import { api, ApiError } from './api'
 import { registerApp, getApp, type AppData, type AppActions, type AppProps } from './apps'
@@ -574,7 +574,7 @@ function PhoneOverlay(): JSX.Element {
 
   // 群列表加载（我是成员/创建者）
   function loadGroupList(): void {
-    fetch(`${PHONE_BASE}/api/v1/phone/group/list?did=${encodeURIComponent(AGENT_DID)}`, { headers: { Accept: 'application/json' } })
+    fetch(`${RCS_BASE}/api/v1/phone/group/list?did=${encodeURIComponent(AGENT_DID)}`, { headers: { Accept: 'application/json' } })
       .then((r) => r.json())
       .then((d) => setGroupList(d.groups || []))
       .catch(() => {})
@@ -582,7 +582,7 @@ function PhoneOverlay(): JSX.Element {
   // 创建群（人号码 + agent DID 混合成员）
   async function createGroup(name: string, members: string[]): Promise<{ gid: string | null; error: string }> {
     try {
-      const r = await (await fetch(`${PHONE_BASE}/api/v1/phone/group`, {
+      const r = await (await fetch(`${RCS_BASE}/api/v1/phone/group`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, creator: AGENT_DID, members }),
       })).json()
@@ -596,7 +596,7 @@ function PhoneOverlay(): JSX.Element {
   // 打开群会话：加载群详情 + 拉群消息
   async function openGroup(groupId: string): Promise<void> {
     try {
-      const g = await (await fetch(`${PHONE_BASE}/api/v1/phone/group/${groupId}`, { headers: { Accept: 'application/json' } })).json()
+      const g = await (await fetch(`${RCS_BASE}/api/v1/phone/group/${groupId}`, { headers: { Accept: 'application/json' } })).json()
       if (g && g.ok) setCurrentGroup({ groupId: g.groupId, name: g.name, members: g.members || [], ...(g.conversationId ? { conversationId: g.conversationId } : {}), ...(g.createdBy ? { createdBy: g.createdBy } : {}), ...(g.announcement ? { announcement: g.announcement } : {}) })
       setGroupMsgLog([])
       // 打开群即标记已读（读游标 = 最新 lastMsgSeq，防群列表角标残留）
@@ -618,7 +618,7 @@ function PhoneOverlay(): JSX.Element {
   // —— 不用"自己收件箱过滤"，因为广播已排除发送者，自己发的消息不在自己收件箱，会被 force 全量替换冲掉
   function pollGroupMessages(groupId: string, force = false): void {
     const since = force ? 0 : (groupLastSeq.current[groupId] || 0)
-    fetch(`${PHONE_BASE}/api/v1/phone/group/${groupId}/messages?since=${since}&limit=100`, { headers: { Accept: 'application/json' }, cache: 'no-store' })
+    fetch(`${RCS_BASE}/api/v1/phone/group/${groupId}/messages?since=${since}&limit=100`, { headers: { Accept: 'application/json' }, cache: 'no-store' })
       .then((r) => r.json())
       .then((d) => {
         const gm = (d.messages || [])
@@ -655,7 +655,7 @@ function PhoneOverlay(): JSX.Element {
     // 拉一次 members-detail 建昵称→成员映射（含号码成员 + agent 成员）
     let nickToMember: Record<string, string> = {}
     try {
-      const md = await (await fetch(`${PHONE_BASE}/api/v1/phone/group/${currentGroup.groupId}/members-detail`, { headers: { Accept: 'application/json' } })).json()
+      const md = await (await fetch(`${RCS_BASE}/api/v1/phone/group/${currentGroup.groupId}/members-detail`, { headers: { Accept: 'application/json' } })).json()
       if (md && Array.isArray(md.members)) {
         for (const x of md.members) {
           if (x.nickname) nickToMember[x.nickname] = x.member
@@ -672,7 +672,7 @@ function PhoneOverlay(): JSX.Element {
     })
     if (notInGroup.length) { res.error = `${notInGroup.join('、')} 不在本群，无法 @`; return res }
     const conv = currentGroup.conversationId ? { conversationId: currentGroup.conversationId } : {}
-    const r = await fetch(`${PHONE_BASE}/api/v1/phone/group/message`, {
+    const r = await fetch(`${RCS_BASE}/api/v1/phone/group/message`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ from: speakAs, fromNumber: speakNumber, groupId: currentGroup.groupId, ...conv, text }),
     }).catch(() => null)
@@ -703,7 +703,7 @@ function PhoneOverlay(): JSX.Element {
   // 退出群（成员自助）
   async function leaveGroup(groupId: string, member: string): Promise<{ ok: boolean; error?: string }> {
     try {
-      const r = await (await fetch(`${PHONE_BASE}/api/v1/phone/group/leave`, {
+      const r = await (await fetch(`${RCS_BASE}/api/v1/phone/group/leave`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ groupId, member }),
       })).json()
@@ -714,7 +714,7 @@ function PhoneOverlay(): JSX.Element {
   // 解散群（管理操作）
   async function disbandGroup(groupId: string): Promise<{ ok: boolean; error?: string }> {
     try {
-      const r = await (await fetch(`${PHONE_BASE}/api/v1/phone/group/disband`, {
+      const r = await (await fetch(`${RCS_BASE}/api/v1/phone/group/disband`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ groupId, actor: AGENT_DID }),
       })).json()
@@ -725,7 +725,7 @@ function PhoneOverlay(): JSX.Element {
   // 群公告（管理操作）
   async function setAnnouncement(groupId: string, text: string): Promise<{ ok: boolean; error?: string }> {
     try {
-      const r = await (await fetch(`${PHONE_BASE}/api/v1/phone/group/announcement`, {
+      const r = await (await fetch(`${RCS_BASE}/api/v1/phone/group/announcement`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ groupId, text, actor: AGENT_DID }),
       })).json()
@@ -874,12 +874,12 @@ function PhoneOverlay(): JSX.Element {
       try {
         const buf = await (await fetch(attachment.url!)).blob()
         const b64 = await new Promise<string>((res) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.readAsDataURL(buf) })
-        const up = await (await fetch(`${PHONE_BASE}/api/v1/phone/attachment`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ did: AGENT_DID, name: attachment.name, mime: attachment.type, data: b64 }) })).json()
+        const up = await (await fetch(`${RCS_BASE}/api/v1/phone/attachment`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ did: AGENT_DID, name: attachment.name, mime: attachment.type, data: b64 }) })).json()
         if (up.ok) att = { ...attachment, fileId: up.fileId, hash: up.hash }
       } catch { return }
     }
     const body: any = { from: speakAs, fromNumber: speakNumber, to, text: text || undefined, attachment: att ? { fileId: att.fileId, name: att.name, size: att.size, hash: att.hash } : undefined }
-    try { await fetch(`${PHONE_BASE}/api/v1/phone/message`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }) } catch { return }
+    try { await fetch(`${RCS_BASE}/api/v1/phone/message`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }) } catch { return }
     setSmsLog((l) => [...l, { fromNumber: speakNumber, text, attachment: att, ts: Date.now() }])
   }
 
@@ -887,13 +887,13 @@ function PhoneOverlay(): JSX.Element {
   React.useEffect(() => {
     const poll = async () => {
       try {
-        const d = await (await fetch(`${PHONE_BASE}/api/v1/phone/messages?did=${encodeURIComponent(AGENT_DID)}&since=${lastSeq}`, { headers: { Accept: 'application/json' }, cache: 'no-store' })).json()
+        const d = await (await fetch(`${RCS_BASE}/api/v1/phone/messages?did=${encodeURIComponent(AGENT_DID)}&since=${lastSeq}`, { headers: { Accept: 'application/json' }, cache: 'no-store' })).json()
         if (d.messages && d.messages.length) {
           bumpSeq(Math.max(...d.messages.map((m: any) => m.seq || 0)))
           // 短信列表：排除信令 + 群消息（群消息有自己的会话流）
           setSmsLog((l) => [...l, ...d.messages.filter((m: any) => !m.signal && !m.groupId).map((m: any) => ({
             fromNumber: m.fromNumber || '对端', text: m.text || undefined,
-            attachment: m.attachment ? { name: m.attachment.name, size: m.attachment.size, hash: m.attachment.hash, fileId: m.attachment.fileId, url: `${PHONE_BASE}/api/v1/phone/attachment/${m.attachment.fileId}`, type: 'application/octet-stream' } : undefined,
+            attachment: m.attachment ? { name: m.attachment.name, size: m.attachment.size, hash: m.attachment.hash, fileId: m.attachment.fileId, url: `${RCS_BASE}/api/v1/phone/attachment/${m.attachment.fileId}`, type: 'application/octet-stream' } : undefined,
             ts: Date.parse(m.at) || Date.now(), seq: m.seq,
           }))])
           // 群消息：当前打开了群 → 增量追加（seq > 已处理游标，防与 openGroup 全量拉取重复）
@@ -1030,7 +1030,7 @@ function PhoneOverlay(): JSX.Element {
     const from = myNumRef.current || NUM_A
     // 信令目标：优先当前呼叫目标（跨设备拨号目标号码）；同页 A↔B 回退固定对端
     const to = callTargetRef.current || (from === NUM_A ? NUM_B : NUM_A)
-    fetch(`${PHONE_BASE}/api/v1/phone/message`, {
+    fetch(`${RCS_BASE}/api/v1/phone/message`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ from: AGENT_DID, fromNumber: from, to, signal: { type, data } }),
     }).catch(() => {})

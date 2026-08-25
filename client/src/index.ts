@@ -19,6 +19,8 @@ const hasProcess = typeof process !== 'undefined' && !!process?.env
 const env = (k: string, d: string) => (hasProcess ? (process.env[k] || d) : d)
 
 const PHONE_BASE = env('DSH_PHONE_BASE', 'https://compliancehub.cn')
+// RCS 服务基址：消息/群/附件走 rcs-server（nginx /rcs/ 前缀）
+const RCS_BASE = PHONE_BASE + '/rcs'
 const AGENT_DID = env('DSH_PHONE_DID', 'did:cha2a:agent:dshlib')
 const AGENT_SHORT = AGENT_DID.split(':').pop() || 'dshlib'
 // 本环境号码（node 半回短信/群的兜底 fromNumber；运行时读 env，缺省同演示配置）
@@ -125,7 +127,7 @@ export function apply(ctx: Context): void {
           // 回短信：agent 身份发回（fromNumber=AGENT_DID 代表 agent，任何电话面板判"收到"左侧）；to 规范化 E.164
           const toNum = src.fromNumber.replace(/[^0-9+]/g, '')
           const displayName = ownNickname || AGENT_SHORT
-          fetch(`${PHONE_BASE}/api/v1/phone/message`, {
+          fetch(`${RCS_BASE}/api/v1/phone/message`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ from: AGENT_DID, fromNumber: AGENT_DID, to: toNum, text: `[agent回复·${displayName}] ${text}`, agent: { did: AGENT_DID, name: displayName, level: ownLevel } }),
           }).catch(() => {})
@@ -133,7 +135,7 @@ export function apply(ctx: Context): void {
         } else if (src.source === 'group' && src.groupId) {
           // 回群广播（来源=group）：agent 回复广播回群；带 conversationId 保持群级会话语义
           const displayName = ownNickname || AGENT_SHORT
-          fetch(`${PHONE_BASE}/api/v1/phone/group/message`, {
+          fetch(`${RCS_BASE}/api/v1/phone/group/message`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ from: AGENT_DID, fromNumber: AGENT_DID, groupId: src.groupId, ...(src.conversationId ? { conversationId: src.conversationId } : {}), text: `[agent回复·${displayName}] ${text}`, agent: { did: AGENT_DID, name: displayName, level: ownLevel } }),
           }).catch(() => {})
@@ -209,7 +211,7 @@ export function apply(ctx: Context): void {
       const sid = await resolveSession(loc)
       if (!sid) return   // 主+alternatives 均失效
       const base = lastChecked[INBOX_KEY] || 0
-      const d = await (await fetch(`${PHONE_BASE}/api/v1/phone/messages?did=${encodeURIComponent(AGENT_DID)}&since=${base}`, {
+      const d = await (await fetch(`${RCS_BASE}/api/v1/phone/messages?did=${encodeURIComponent(AGENT_DID)}&since=${base}`, {
         headers: { Accept: 'application/json' }, cache: 'no-store',
       })).json()
       const msgs = (d.messages || []) as any[]
@@ -232,7 +234,7 @@ export function apply(ctx: Context): void {
         // v2 文本附件：kind=text 时拉取全文注入 prompt（长内容 → LLM 上下文对齐）
         let bodyText = text
         if (m.attachment && m.attachment.kind === 'text' && m.attachment.fileId) {
-          const full = await fetch(`${PHONE_BASE}/api/v1/phone/attachment/${m.attachment.fileId}`, { headers: { Accept: 'application/octet-stream' } })
+          const full = await fetch(`${RCS_BASE}/api/v1/phone/attachment/${m.attachment.fileId}`, { headers: { Accept: 'application/octet-stream' } })
             .then((r) => r.ok ? r.text() : '').catch(() => '')
           if (full) {
             const MAX_INJECT = 50000   // 单次注入上限（防超长附件占满上下文）
