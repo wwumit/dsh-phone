@@ -442,6 +442,11 @@ function PhonePanel(props: {
         aria-label={`dsh-phone ${props.id}`} title={`${props.label} · ${props.ownNumber}`}
       >
         📞{incoming ? '🔔' : ''}
+        {/* 名字显示在圆圈正下方（absolute 定位，不改变按钮 48px 固定尺寸；超长省略号，完整名在 title） */}
+        <span style={{ position: 'absolute', top: '100%', left: '50%', transform: 'translateX(-50%)',
+          marginTop: 3, fontSize: 9.5, color: '#e8e8ea', lineHeight: 1.2, whiteSpace: 'nowrap',
+          maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', textShadow: '0 1px 3px rgba(0,0,0,.9)',
+          pointerEvents: 'none' }}>{props.floatLabel}</span>
       </button>
 
       {effectiveOpen && (
