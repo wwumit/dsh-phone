@@ -227,10 +227,10 @@ export function GroupChatApp(p: AppProps): JSX.Element {
     }
   }
   function pickAt(c: { key: string; label: string; isAgent: boolean }): void {
-    // 用 @名字 替换掉输入流末尾的 @查询；agent 插入 DID 短名（@volcano-demo），号码成员插入短号（@0001）
+    // 用 @名字 替换掉输入流末尾的 @查询；插入昵称（与候选显示一致）——agent 显示昵称、号码显示短号
     const at = groupInput.lastIndexOf('@')
     const head = at === -1 ? groupInput : groupInput.slice(0, at)
-    const mention = c.isAgent ? c.key.split(':').pop()! : c.key.replace(/^\+86\s*/, '').replace(/^\+86/, '')
+    const mention = c.isAgent ? (c.label || c.key.split(':').pop()!) : c.key.replace(/^\+86\s*/, '').replace(/^\+86/, '')
     setGroupInput(head + '@' + mention + ' ')
     setAtQuery(null)
   }

@@ -437,7 +437,7 @@ function PhonePanel(props: {
         style={{ position: 'fixed', left: props.pos.x - 24, top: props.pos.y - 24,
           width: 48, height: 48, borderRadius: '50%',
           background: t.key, color: t.accent, border: incoming ? '2px solid #22d3ee' : '1px solid #3a3a3c',
-          fontSize: 20, cursor: 'grab', zIndex: 999, boxShadow: '0 4px 14px rgba(0,0,0,.4)', touchAction: 'none',
+          fontSize: 20, cursor: 'grab', zIndex: 1200, boxShadow: '0 4px 14px rgba(0,0,0,.4)', touchAction: 'none',
           display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}
         aria-label={`dsh-phone ${props.id}`} title={`${props.label} · ${props.ownNumber}`}
       >
@@ -651,10 +651,25 @@ function PhoneOverlay(): JSX.Element {
     if (!currentGroup) return res
     // 提取所有 @ 提及（任意位置：开头/句中/句尾）
     const mentions = [...new Set([...text.matchAll(/@([\w.-]+)/g)].map((m) => m[1]))]
-    // 成员校验：所有 @ 的目标必须在群里（agent 短名 或 号码按 +86 归一）
+    // @昵称 → 成员 DID 解析：agent 成员可用昵称（metadata.name/author）@，需映射回 DID 才能投递
+    // 拉一次 members-detail 建昵称→成员映射（含号码成员 + agent 成员）
+    let nickToMember: Record<string, string> = {}
+    try {
+      const md = await (await fetch(`${PHONE_BASE}/api/v1/phone/group/${currentGroup.groupId}/members-detail`, { headers: { Accept: 'application/json' } })).json()
+      if (md && Array.isArray(md.members)) {
+        for (const x of md.members) {
+          if (x.nickname) nickToMember[x.nickname] = x.member
+          if (x.member?.startsWith('did:')) nickToMember[x.member.split(':').pop()!] = x.member  // DID 短名也映射
+        }
+      }
+    } catch {}
+    // 成员校验：@ 目标必须是群成员（agent 短名/昵称 → 成员 DID；号码按 +86 归一）
     const normNum = (s: string) => s.replace(/^\+86/, '').replace(/[^0-9]/g, '')
-    const notInGroup = mentions.filter((name) => !(currentGroup.members || []).some((mm) =>
-      mm === `did:cha2a:agent:${name}` || (!mm.startsWith('did:') && normNum(mm) === normNum(name))))
+    const notInGroup = mentions.filter((name) => {
+      const member = nickToMember[name] || name
+      return !(currentGroup.members || []).some((mm) =>
+        mm === member || mm === `did:cha2a:agent:${name}` || (!mm.startsWith('did:') && normNum(mm) === normNum(name)))
+    })
     if (notInGroup.length) { res.error = `${notInGroup.join('、')} 不在本群，无法 @`; return res }
     const conv = currentGroup.conversationId ? { conversationId: currentGroup.conversationId } : {}
     const r = await fetch(`${PHONE_BASE}/api/v1/phone/group/message`, {
@@ -670,14 +685,15 @@ function PhoneOverlay(): JSX.Element {
     }
     // @agent 投递：所有 @ 到的 agent 成员都投递（@人仅提及，不投递）；内容 = 整条消息
     for (const mentioned of mentions) {
-      // 跳过 @ 自己（自己的短名）——sendSmsToAgent 已挡，这里避免进 delivered 列表
-      if (mentioned === AGENT_DID.replace(/^did:cha2a:agent:/, '')) continue
-      const isAgentMember = (currentGroup.members || []).some((mm) => mm === `did:cha2a:agent:${mentioned}`)
-      if (isAgentMember) {
-        const ok = await sendSmsToAgent(mentioned, text, from === 'A' ? NUM_A : NUM_B, 'group', currentGroup.groupId, currentGroup.conversationId)
-        if (ok) res.delivered.push(mentioned)
-        else res.failed.push(mentioned)
-      }
+      // 解析 @昵称/@短名 → 成员 DID（昵称必须映射回 DID 才能投递）
+      const memberDid = nickToMember[mentioned] || (currentGroup.members || []).find((mm) => mm === `did:cha2a:agent:${mentioned}`) || null
+      // 跳过 @ 自己（自己的短名/昵称）——sendSmsToAgent 已挡，这里避免进 delivered 列表
+      if (!memberDid) continue
+      const mentionedShort = memberDid.split(':').pop()!
+      if (mentionedShort === AGENT_DID.replace(/^did:cha2a:agent:/, '')) continue
+      const ok = await sendSmsToAgent(mentionedShort, text, from === 'A' ? NUM_A : NUM_B, 'group', currentGroup.groupId, currentGroup.conversationId)
+      if (ok) res.delivered.push(mentionedShort)
+      else res.failed.push(mentionedShort)
     }
     // 乐观追加（立即显示自己的消息）+ 立即 force 刷新（替换为生产全量，防乐观+轮询重复）
     setGroupMsgLog((l) => [...l, { fromNumber: speakNumber, text, ts: Date.now() }])
