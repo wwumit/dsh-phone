@@ -45,6 +45,9 @@ const client: UserConfig = {
     'process.env.DSH_PHONE_DID': JSON.stringify(process.env.DSH_PHONE_DID ?? ''),
     'process.env.DSH_PHONE_NUM_A': JSON.stringify(process.env.DSH_PHONE_NUM_A ?? ''),
     'process.env.DSH_PHONE_NUM_B': JSON.stringify(process.env.DSH_PHONE_NUM_B ?? ''),
+    'process.env.DSH_PHONE_OWNER_DID': JSON.stringify(process.env.DSH_PHONE_OWNER_DID ?? ''),
+    'process.env.DSH_PHONE_AGENT_LABEL': JSON.stringify(process.env.DSH_PHONE_AGENT_LABEL ?? ''),
+    'process.env.DSH_PHONE_OWNER_LABEL': JSON.stringify(process.env.DSH_PHONE_OWNER_LABEL ?? ''),
   },
   outputOptions: {
     entryFileNames: 'client.js',
