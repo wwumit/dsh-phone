@@ -434,15 +434,14 @@ function PhonePanel(props: {
       <button
         onClick={() => { if (!props.justDragged) { props.onFocus(); setOpen(!open) } }}
         onPointerDown={props.onDragStart}
-        style={{ position: 'fixed', left: props.pos.x - 26, top: props.pos.y - 26,
-          minWidth: 56, height: 56, padding: '0 14px', borderRadius: 28,
+        style={{ position: 'fixed', left: props.pos.x - 24, top: props.pos.y - 24,
+          width: 48, height: 48, borderRadius: '50%',
           background: t.key, color: t.accent, border: incoming ? '2px solid #22d3ee' : '1px solid #3a3a3c',
           fontSize: 20, cursor: 'grab', zIndex: 999, boxShadow: '0 4px 14px rgba(0,0,0,.4)', touchAction: 'none',
-          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1 }}
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}
         aria-label={`dsh-phone ${props.id}`} title={`${props.label} · ${props.ownNumber}`}
       >
         📞{incoming ? '🔔' : ''}
-        <span style={{ fontSize: 8.5, color: t.sub, lineHeight: 1, whiteSpace: 'nowrap', maxWidth: 96, overflow: 'hidden', textOverflow: 'ellipsis' }}>{props.floatLabel}</span>
       </button>
 
       {effectiveOpen && (
@@ -717,17 +716,38 @@ function PhoneOverlay(): JSX.Element {
   const [call, setCall] = useState<{ stage: 'ringing' | 'connected'; callerId: string; calleeId: string; call?: any; connectedAt: number } | null>(null)
 
   // ── 每部电话独立位置（拖动锚点，屏幕坐标 left/top；localStorage 持久化）──
-  // v2：浮标改为胶囊形显示名字后，旧 pos（52px 圆钮时代）不再贴合，升级重置一次
-  const POS_KEY = 'dsh-phone-pos-v2'
+  // v3：初始位置改为 DSH 对话框内部右侧（v2 的窗口右上角旧位置不再贴合，升级重置）
+  const POS_KEY = 'dsh-phone-pos-v3'
+  // 缺省位置：DSH 对话框内部右侧（对话区容器内，不遮挡输入区）——用 DOM 查询对话区，找不到回退窗口右侧
+  function defaultPos(): Record<'A' | 'B', { x: number; y: number }> {
+    let box: DOMRect | null = null
+    try {
+      const scroll = document.querySelector('[data-conversation-scroll]') || document.querySelector('[data-composer-seat]')
+      if (scroll) box = scroll.getBoundingClientRect()
+    } catch {}
+    if (box && box.width > 100 && box.height > 100) {
+      // 对话框内部右上（右侧偏上，避开输入区）；A/B 并排，B 靠左一点
+      return {
+        A: { x: box.right - 56, y: box.top + 90 },
+        B: { x: box.right - 116, y: box.top + 90 },
+      }
+    }
+    // 回退：窗口右侧上部（无对话区时）
+    return {
+      A: { x: window.innerWidth - 90, y: window.innerHeight * 0.22 },
+      B: { x: window.innerWidth - 150, y: window.innerHeight * 0.22 },
+    }
+  }
   function loadPos(): Record<'A' | 'B', { x: number; y: number }> {
     try {
       const d = JSON.parse(localStorage.getItem(POS_KEY) || '{}')
-      // 缺省：DSH 对话框右上角上方（右侧上部，不遮挡对话输入区）
+      const def = defaultPos()
+      // 用户拖过（localStorage 有值）→ 沿用；否则用缺省（对话框内）
       return {
-        A: { x: typeof d.A?.x === 'number' ? d.A.x : window.innerWidth - 90, y: typeof d.A?.y === 'number' ? d.A.y : window.innerHeight * 0.22 },
-        B: { x: typeof d.B?.x === 'number' ? d.B.x : window.innerWidth - 150, y: typeof d.B?.y === 'number' ? d.B.y : window.innerHeight * 0.22 },
+        A: { x: typeof d.A?.x === 'number' ? d.A.x : def.A.x, y: typeof d.A?.y === 'number' ? d.A.y : def.A.y },
+        B: { x: typeof d.B?.x === 'number' ? d.B.x : def.B.x, y: typeof d.B?.y === 'number' ? d.B.y : def.B.y },
       }
-    } catch { return { A: { x: window.innerWidth - 90, y: window.innerHeight * 0.22 }, B: { x: window.innerWidth - 150, y: window.innerHeight * 0.22 } } }
+    } catch { return defaultPos() }
   }
   const [pos, setPos] = useState<Record<'A' | 'B', { x: number; y: number }>>(loadPos)
   const posRef = useRef(pos)
