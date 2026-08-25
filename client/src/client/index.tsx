@@ -595,8 +595,20 @@ function PhoneOverlay(): JSX.Element {
       const g = await (await fetch(`${PHONE_BASE}/api/v1/phone/group/${groupId}`, { headers: { Accept: 'application/json' } })).json()
       if (g && g.ok) setCurrentGroup({ groupId: g.groupId, name: g.name, members: g.members || [], ...(g.conversationId ? { conversationId: g.conversationId } : {}), ...(g.createdBy ? { createdBy: g.createdBy } : {}), ...(g.announcement ? { announcement: g.announcement } : {}) })
       setGroupMsgLog([])
+      // 打开群即标记已读（读游标 = 最新 lastMsgSeq，防群列表角标残留）
+      markGroupRead(groupId)
       pollGroupMessages(groupId, true)
     } catch {}
+  }
+  // 群已读游标：localStorage（groupId → 已读 seq）；打开群 / 收到当前群新消息时更新
+  const GROUP_READ_KEY = 'dsh-phone-group-read'
+  function loadGroupRead(): Record<string, number> { try { return JSON.parse(localStorage.getItem(GROUP_READ_KEY) || '{}') } catch { return {} } }
+  function saveGroupRead(r: Record<string, number>): void { try { localStorage.setItem(GROUP_READ_KEY, JSON.stringify(r)) } catch {} }
+  function markGroupRead(groupId: string, seq?: number): void {
+    const r = loadGroupRead()
+    const g = groupList.find((x) => x.groupId === groupId)
+    const target = seq ?? g?.lastMsgSeq ?? 0
+    if (target > (r[groupId] || 0)) { r[groupId] = target; saveGroupRead(r) }
   }
   // 群消息拉取：用 v2 群历史分页端点（聚合所有成员收件箱，含发送者自己）
   // —— 不用"自己收件箱过滤"，因为广播已排除发送者，自己发的消息不在自己收件箱，会被 force 全量替换冲掉
@@ -608,6 +620,8 @@ function PhoneOverlay(): JSX.Element {
         const gm = (d.messages || [])
         if (gm.length) {
           groupLastSeq.current[groupId] = Math.max(...gm.map((m: any) => m.seq || 0), groupLastSeq.current[groupId] || 0)
+          // 当前打开的群收到新消息 → 已读游标同步推进（角标不残留）
+          if (currentGroup?.groupId === groupId) markGroupRead(groupId, groupLastSeq.current[groupId])
           const mapped = gm.map((m: any) => ({ from: m.from || '', fromNumber: m.fromNumber || '对端', text: m.text || '', ts: Date.parse(m.at) || Date.now(), ...(m.agent ? { agent: m.agent } : {}), ...(m.kind ? { kind: m.kind } : {}), ...(m.payload ? { payload: m.payload } : {}), ...(m.status ? { status: m.status } : {}), seq: m.seq }))
           // force（打开群）：全量替换（防与轮询竞争重复）；增量：追加
           if (force) setGroupMsgLog(mapped)

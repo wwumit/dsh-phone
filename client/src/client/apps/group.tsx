@@ -21,6 +21,15 @@ export function GroupApp(p: AppProps): JSX.Element {
   const [picked, setPicked] = useState<string[]>([])   // 从通讯录点选的成员号码
   const [createErr, setCreateErr] = useState('')
   const [creating, setCreating] = useState(false)
+  // 已读游标快照（打开群后刷新群列表会触发重渲染，这里一次性读）
+  const readSnap = loadRead()
+  // 打开群：标记已读并刷新列表（角标立即消除）
+  async function openAndRead(g: { groupId: string }): Promise<void> {
+    await actions.openGroup(g.groupId)
+    const r = loadRead(); r[g.groupId] = (data.group.list.find((x) => x.groupId === g.groupId)?.lastMsgSeq) || 0; saveRead(r)
+    actions.loadGroupList()   // 刷新列表触发重渲染
+    nav('group-chat')
+  }
 
   // 展开创建表单时：若通讯录未加载则拉取（registry 号码簿 = 可选的成员池）
   function toggleCreate(): void {
@@ -44,9 +53,9 @@ export function GroupApp(p: AppProps): JSX.Element {
         {data.group.list.length === 0
           ? <div style={{ fontSize: 12, color: t.muted }}>暂无群（点刷新加载）</div>
           : data.group.list.map((g) => {
-            const unread = Math.max(0, (g.lastMsgSeq || 0) - (loadRead()[g.groupId] || 0))
+            const unread = Math.max(0, (g.lastMsgSeq || 0) - (readSnap[g.groupId] || 0))
             return (
-            <button key={g.groupId} onClick={async () => { await actions.openGroup(g.groupId); nav('group-chat') }} style={{ display: 'block', width: '100%', textAlign: 'left', background: t.key, border: '1px solid #2c2c2e', borderRadius: 10, padding: '9px 12px', marginBottom: 6, cursor: 'pointer' }}>
+            <button key={g.groupId} onClick={() => openAndRead(g)} style={{ display: 'block', width: '100%', textAlign: 'left', background: t.key, border: '1px solid #2c2c2e', borderRadius: 10, padding: '9px 12px', marginBottom: 6, cursor: 'pointer' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ color: '#fff', fontSize: 13, flex: 1 }}>{g.name}</span>
                 {unread > 0 && <span style={{ minWidth: 18, height: 18, borderRadius: 9, background: '#ff3b30', color: '#fff', fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{unread > 99 ? '99+' : unread}</span>}
@@ -68,7 +77,7 @@ export function GroupApp(p: AppProps): JSX.Element {
           {/* 成员选择：号码成员（通讯录）+ agent 成员（已注册，含无号码的）+ 手动补充 */}
           <div style={{ fontSize: 10, color: t.sub, marginBottom: 4 }}>成员（📞 号码成员 / 🤖 agent 成员（无号码），均点选；也可手输）</div>
           <div style={{ maxHeight: 132, overflowY: 'auto', background: t.key, borderRadius: 8, padding: 6, marginBottom: 6 }}>
-            {!data.contacts && !data.agents && <div style={{ fontSize: 11, color: t.muted, padding: 4 }}>成员加载中…</div>}
+            {(!data.contacts || !data.agents) ? <div style={{ fontSize: 11, color: t.muted, padding: 4 }}>成员加载中…</div> : null}
             {/* 号码成员（有号码的：人 或 agent 的号码——通讯录） */}
             {data.contacts?.map((c) => {
               const on = picked.includes(c.number)
@@ -139,10 +148,10 @@ export function GroupChatApp(p: AppProps): JSX.Element {
     if (sendNoteTimer.current) clearTimeout(sendNoteTimer.current)
     sendNoteTimer.current = setTimeout(() => setSendNote(''), 6000)
   }
-  // 收到 agent 回复 → "等待回复"提示立即消失
+  // 收到 agent 回复 → "等待回复"提示立即消失（node 半回复前缀：[agent回复·短名]）
   React.useEffect(() => {
     const last = data.group.msgs[data.group.msgs.length - 1]
-    if (last && (last.text || '').startsWith('[agent回复]')) setSendNote('')
+    if (last && (last.text || '').startsWith('[agent回复')) setSendNote('')
   }, [data.group.msgs.length])
   const [nickMap, setNickMap] = useState<Record<string, { nickname: string; type: 'phone' | 'agent'; level: number; capabilities?: string[] }>>({})
   const cur = data.group.current
@@ -233,16 +242,15 @@ export function GroupChatApp(p: AppProps): JSX.Element {
     const text = groupInput.trim()
     if (!text) return
     // @agent 校验：@ 的 agent 必须是群成员（群成员是号码/DID 列表）
-    // 匹配：agent DID 短名 / 昵称（nickMap）/ 号码成员按 +86 归一
-    const m = text.match(/^@([\w.-]+)\s/)
-    if (m) {
-      const mentioned = m[1]
+    // 匹配：agent DID 短名 / 昵称（nickMap）/ 号码成员按 +86 归一（与后端 groups.js 一致：任意位置 @）
+    const mentionedAll = [...new Set([...text.matchAll(/@([\w.-]+)/g)].map((mm) => mm[1]))]
+    if (mentionedAll.length) {
       const normNum = (s: string) => s.replace(/^\+86/, '').replace(/[^0-9]/g, '')
-      const isMember = (cur.members || []).some((mm) =>
-        mm === `did:cha2a:agent:${mentioned}` ||
-        nickMap[mm]?.nickname === mentioned ||
-        (!mm.startsWith('did:') && normNum(mm) === normNum(mentioned)))
-      if (!isMember) { setSendErr(`⚠ ${mentioned} 不在本群，无法 @`); return }
+      const notInGroup = mentionedAll.filter((name) => !(cur.members || []).some((mm) =>
+        mm === `did:cha2a:agent:${name}` ||
+        nickMap[mm]?.nickname === name ||
+        (!mm.startsWith('did:') && normNum(mm) === normNum(name))))
+      if (notInGroup.length) { setSendErr(`⚠ ${notInGroup.join('、')} 不在本群，无法 @`); return }
     }
     setSendErr('')
     setGroupInput('')
@@ -432,6 +440,11 @@ export function GroupInfoApp(p: AppProps): JSX.Element {
   }
   const display = (member: string): { nickname: string; type: string; level: number } =>
     nickMap[member] || { nickname: member.startsWith('did:cha2a:agent:') ? member.split(':').pop()! : member.replace(/^\+86 95123 0+/, ''), type: member.startsWith('did:cha2a:agent:') ? 'agent' : 'phone', level: 0 }
+  // 群主权限：当前面板（号码或 agent DID）是创建者才有踢人/解散权限（后端 requireAdmin 兜底）
+  const normN = (s: string) => s.replace(/[^0-9+]/g, '')
+  const isCreator = cur.createdBy === data.ownNumber || cur.createdBy === AGENT_DID ||
+    (cur.createdBy || '').startsWith('did:') && cur.createdBy === (data.ownerDid || '') ||
+    normN(cur.createdBy || '') === normN(data.ownNumber)
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -466,7 +479,7 @@ export function GroupInfoApp(p: AppProps): JSX.Element {
               <span style={{ flex: 1, fontSize: 13, color: '#fff' }}>{d.nickname}</span>
               {d.type === 'agent' ? <span style={{ fontSize: 9, color: '#ffd60a', border: '1px solid #ffd60a', borderRadius: 4, padding: '0 4px' }}>🤖 agent</span> : <span style={{ fontSize: 9, color: '#5ac8fa', border: '1px solid #5ac8fa', borderRadius: 4, padding: '0 4px' }}>📞 电话</span>}
               {isOwner && <span style={{ fontSize: 9, color: t.warn }}>群主</span>}
-              <button onClick={() => removeMember(m)} title="移除" style={{ background: 'none', border: 'none', color: t.bad, fontSize: 13, cursor: 'pointer' }}>✕</button>
+              {isCreator && !isOwner && <button onClick={() => removeMember(m)} title="移除" style={{ background: 'none', border: 'none', color: t.bad, fontSize: 13, cursor: 'pointer' }}>✕</button>}
             </div>
           )
         })}
@@ -490,13 +503,13 @@ export function GroupInfoApp(p: AppProps): JSX.Element {
           </div>
         )}
         {msg && <div style={{ marginTop: 6, fontSize: 11, color: t.sub }}>{msg}</div>}
-        <button onClick={() => setAddMode(!addMode)} style={{ width: '100%', height: 30, borderRadius: 999, background: t.key, color: t.accent, border: '1px solid #2c2c2e', fontSize: 12, cursor: 'pointer', marginTop: 8 }}>{addMode ? '取消' : '＋ 添加成员'}</button>
-        {/* 退出群 / 解散群 */}
+        {isCreator && <button onClick={() => setAddMode(!addMode)} style={{ width: '100%', height: 30, borderRadius: 999, background: t.key, color: t.accent, border: '1px solid #2c2c2e', fontSize: 12, cursor: 'pointer', marginTop: 8 }}>{addMode ? '取消' : '＋ 添加成员'}</button>}
+        {/* 退出群 / 解散群（解散仅群主可见） */}
         <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
           <button onClick={() => setConfirming(confirming === 'leave' ? null : 'leave')}
             style={{ flex: 1, height: 30, borderRadius: 999, background: t.key, color: t.warn, border: '1px solid rgba(255,159,10,.4)', fontSize: 12, cursor: 'pointer' }}>退出群</button>
-          <button onClick={() => setConfirming(confirming === 'disband' ? null : 'disband')}
-            style={{ flex: 1, height: 30, borderRadius: 999, background: t.key, color: t.bad, border: '1px solid rgba(255,59,48,.4)', fontSize: 12, cursor: 'pointer' }}>解散群</button>
+          {isCreator && <button onClick={() => setConfirming(confirming === 'disband' ? null : 'disband')}
+            style={{ flex: 1, height: 30, borderRadius: 999, background: t.key, color: t.bad, border: '1px solid rgba(255,59,48,.4)', fontSize: 12, cursor: 'pointer' }}>解散群</button>}
         </div>
         {confirming === 'leave' && (
           <div style={{ marginTop: 6, fontSize: 11, color: t.sub, textAlign: 'center' }}>
