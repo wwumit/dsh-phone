@@ -156,6 +156,7 @@ interface SmsMsg {
 function PhonePanel(props: {
   id: 'A' | 'B'
   label: string
+  floatLabel: string
   ownNumber: string
   otherNumber: string
   smsList: SmsMsg[]
@@ -387,13 +388,14 @@ function PhonePanel(props: {
         onClick={() => { if (!props.justDragged) { props.onFocus(); setOpen(!open) } }}
         onPointerDown={props.onDragStart}
         style={{ position: 'fixed', left: props.pos.x - 26, top: props.pos.y - 26,
-          width: 52, height: 52, borderRadius: '50%',
+          minWidth: 56, height: 56, padding: '0 14px', borderRadius: 28,
           background: t.key, color: t.accent, border: incoming ? '2px solid #22d3ee' : '1px solid #3a3a3c',
-          fontSize: 20, cursor: 'grab', zIndex: 999, boxShadow: '0 4px 14px rgba(0,0,0,.4)', touchAction: 'none' }}
+          fontSize: 20, cursor: 'grab', zIndex: 999, boxShadow: '0 4px 14px rgba(0,0,0,.4)', touchAction: 'none',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1 }}
         aria-label={`dsh-phone ${props.id}`} title={`${props.label} · ${props.ownNumber}`}
       >
         📞{incoming ? '🔔' : ''}
-        <span style={{ position: 'absolute', bottom: -7, left: 0, right: 0, fontSize: 9, color: t.sub }}>{props.id}</span>
+        <span style={{ fontSize: 8.5, color: t.sub, lineHeight: 1, whiteSpace: 'nowrap', maxWidth: 96, overflow: 'hidden', textOverflow: 'ellipsis' }}>{props.floatLabel}</span>
       </button>
 
       {effectiveOpen && (
@@ -443,7 +445,7 @@ function PhonePanel(props: {
                 {incoming ? (
                   <>
                     <div style={{ fontSize: 15, color: '#fff', fontWeight: 600 }}>来电</div>
-                    <div style={{ fontSize: 13, color: '#8e8e93' }}>{props.call.callerId === 'A' ? '电话 A' : props.call.callerId === 'B' ? '电话 B' : props.call.callerId}</div>
+                    <div style={{ fontSize: 13, color: '#8e8e93' }}>{props.call.callerId === 'A' ? AGENT_LABEL : props.call.callerId === 'B' ? OWNER_LABEL : props.call.callerId}</div>
                     <div style={{ display: 'flex', gap: 26 }}>
                       <button onClick={() => props.onAnswer()} style={{ width: 64, height: 64, borderRadius: '50%', background: '#34c759', color: '#fff', border: 0, fontSize: 12, cursor: 'pointer' }}>接听</button>
                       <button onClick={() => props.onHangup()} style={{ width: 64, height: 64, borderRadius: '50%', background: '#ff3b30', color: '#fff', border: 0, fontSize: 12, cursor: 'pointer' }}>挂断</button>
@@ -452,13 +454,13 @@ function PhonePanel(props: {
                 ) : isCaller ? (
                   <>
                     <div style={{ fontSize: 15, color: '#fff', fontWeight: 600 }}>呼叫中…</div>
-                    <div style={{ fontSize: 13, color: '#8e8e93' }}>{props.call.calleeId === 'A' ? '电话 A' : props.call.calleeId === 'B' ? '电话 B' : props.call.calleeId}</div>
+                    <div style={{ fontSize: 13, color: '#8e8e93' }}>{props.call.calleeId === 'A' ? AGENT_LABEL : props.call.calleeId === 'B' ? OWNER_LABEL : props.call.calleeId}</div>
                     <button onClick={() => props.onHangup()} style={{ width: 64, height: 64, borderRadius: '50%', background: '#ff3b30', color: '#fff', border: 0, fontSize: 12, cursor: 'pointer' }}>挂断</button>
                   </>
                 ) : isConnected ? (
                   <>
                     <div style={{ fontSize: 15, color: '#fff', fontWeight: 600 }}>通话中</div>
-                    <div style={{ fontSize: 13, color: '#8e8e93' }}>{props.call.callerId === 'A' ? '电话 A' : props.call.callerId === 'B' ? '电话 B' : props.call.callerId}</div>
+                    <div style={{ fontSize: 13, color: '#8e8e93' }}>{props.call.callerId === 'A' ? AGENT_LABEL : props.call.callerId === 'B' ? OWNER_LABEL : props.call.callerId}</div>
                     <button onClick={() => props.onHangup()} style={{ width: 64, height: 64, borderRadius: '50%', background: '#ff3b30', color: '#fff', border: 0, fontSize: 12, cursor: 'pointer' }}>挂断</button>
                   </>
                 ) : null}
@@ -1044,10 +1046,10 @@ function PhoneOverlay(): JSX.Element {
 
   return (
     <>
-      <PhonePanel id="A" label={`${AGENT_LABEL} · ${MINE_NUM.A}`} ownNumber={MINE_NUM.A} otherNumber={PEER_NUM.A}
+      <PhonePanel id="A" label={`${AGENT_LABEL} · ${MINE_NUM.A}`} floatLabel={AGENT_LABEL} ownNumber={MINE_NUM.A} otherNumber={PEER_NUM.A}
         badgeLevel={3} smsList={smsLog} onSendSms={sendSms} voice={voiceFace}
         group={{ list: groupList, current: currentGroup, msgs: groupMsgLog, onLoadList: loadGroupList, onCreate: createGroup, onOpen: (gid) => { setCurrentGroup(null); setGroupMsgLog([]); return openGroup(gid) }, onSend: sendGroup, onLeave: leaveGroup, onDisband: disbandGroup, onAnnouncement: setAnnouncement, onBack: () => { setCurrentGroup(null); setGroupMsgLog([]) } }} onReport={reportUsage} theme={themeOf('A')} unlocked={unlocked} onUnlock={onUnlock} onSelectTheme={(n) => onSelectTheme('A', n)} top={topPanel === 'A'} onFocus={() => setTopPanel('A')} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} pos={pos.A} onDragStart={(e) => startDrag('A', e)} justDragged={justDragged} />
-      <PhonePanel id="B" label={`${OWNER_LABEL} · ${MINE_NUM.B}`} ownNumber={MINE_NUM.B} otherNumber={PEER_NUM.B}
+      <PhonePanel id="B" label={`${OWNER_LABEL} · ${MINE_NUM.B}`} floatLabel={OWNER_LABEL} ownNumber={MINE_NUM.B} otherNumber={PEER_NUM.B}
         badgeLevel={3} smsList={smsLog} onSendSms={sendSms} voice={voiceFace}
         group={{ list: groupList, current: currentGroup, msgs: groupMsgLog, onLoadList: loadGroupList, onCreate: createGroup, onOpen: (gid) => { setCurrentGroup(null); setGroupMsgLog([]); return openGroup(gid) }, onSend: sendGroup, onLeave: leaveGroup, onDisband: disbandGroup, onAnnouncement: setAnnouncement, onBack: () => { setCurrentGroup(null); setGroupMsgLog([]) } }} onReport={reportUsage} theme={themeOf('B')} unlocked={unlocked} onUnlock={onUnlock} onSelectTheme={(n) => onSelectTheme('B', n)} top={topPanel === 'B'} onFocus={() => setTopPanel('B')} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} pos={pos.B} onDragStart={(e) => startDrag('B', e)} justDragged={justDragged} />
     </>
