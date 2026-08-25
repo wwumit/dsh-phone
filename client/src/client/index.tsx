@@ -232,7 +232,8 @@ function PhonePanel(props: {
     fetch(`${PHONE_BASE}/api/v1/did/${encodeURIComponent(AGENT_DID)}`, { headers: { Accept: 'application/json' } })
       .then((r) => r.json())
       .then((d) => {
-        if (d && d.did) {
+        // DID Document 的标识字段是 id（不是 did）；registry /api/v1/did/<did> 返回 { id, metadata, ... }
+        if (d && (d.id === AGENT_DID || d.did === AGENT_DID)) {
           const lvl = d.level ?? 0
           setAccount((a) => ({ ...a, agentState: 'registered', agentLevel: lvl, agentLevelName: d.levelName || `L${lvl}`, err: '' }))
         } else {
