@@ -124,16 +124,18 @@ export function apply(ctx: Context): void {
         if (src.source === 'sms') {
           // 回短信：agent 身份发回（fromNumber=AGENT_DID 代表 agent，任何电话面板判"收到"左侧）；to 规范化 E.164
           const toNum = src.fromNumber.replace(/[^0-9+]/g, '')
+          const displayName = ownNickname || AGENT_SHORT
           fetch(`${PHONE_BASE}/api/v1/phone/message`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ from: AGENT_DID, fromNumber: AGENT_DID, to: toNum, text: `[agent回复·${AGENT_SHORT}] ${text}`, agent: { did: AGENT_DID, name: AGENT_SHORT, level: ownLevel } }),
+            body: JSON.stringify({ from: AGENT_DID, fromNumber: AGENT_DID, to: toNum, text: `[agent回复·${displayName}] ${text}`, agent: { did: AGENT_DID, name: displayName, level: ownLevel } }),
           }).catch(() => {})
           routed++
         } else if (src.source === 'group' && src.groupId) {
           // 回群广播（来源=group）：agent 回复广播回群；带 conversationId 保持群级会话语义
+          const displayName = ownNickname || AGENT_SHORT
           fetch(`${PHONE_BASE}/api/v1/phone/group/message`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ from: AGENT_DID, fromNumber: AGENT_DID, groupId: src.groupId, ...(src.conversationId ? { conversationId: src.conversationId } : {}), text: `[agent回复·${AGENT_SHORT}] ${text}`, agent: { did: AGENT_DID, name: AGENT_SHORT, level: ownLevel } }),
+            body: JSON.stringify({ from: AGENT_DID, fromNumber: AGENT_DID, groupId: src.groupId, ...(src.conversationId ? { conversationId: src.conversationId } : {}), text: `[agent回复·${displayName}] ${text}`, agent: { did: AGENT_DID, name: displayName, level: ownLevel } }),
           }).catch(() => {})
           routed++
         }
@@ -161,11 +163,15 @@ export function apply(ctx: Context): void {
   async function resolveSession(loc: any): Promise<string | null> {
     if (!loc || !loc.bound) return null
     const candidates = [loc.sessionId, ...((loc.alternatives || []).map((a: any) => a.sessionId))].filter(Boolean)
+    const hasSQ = !!(ctx as any).sessionQuery
     for (const sid of candidates) {
       try {
         const s = await (ctx as any).sessionQuery?.readSession?.(sid)
         if (s) return sid
-      } catch { /* 该候选失效，试下一个 */ }
+        console.log(`[dsh-phone] readSession 返回空: sid=${sid.slice(0, 12)} hasSessionQuery=${hasSQ}`)
+      } catch (e) {
+        console.log(`[dsh-phone] readSession 异常: sid=${sid.slice(0, 12)} err=${String(e).slice(0, 80)}`)
+      }
     }
     return null
   }
@@ -236,9 +242,10 @@ export function apply(ctx: Context): void {
             bodyText = `[文本附件 ${m.attachment.name || 'file'} 拉取失败，仅引用]\n${text}`
           }
         }
+        const selfIntro = ownNickname ? `[身份] 你是「${ownNickname}」（数字员工），不要自称 dshlib 或其他名字。` : ''
         const prompt = m.groupId
-          ? `${srcTag} [群聊消息] ${fromNumber} 在群里发来消息，请直接回复（回复会原样发回群里）。消息：${bodyText}`
-          : `${srcTag} [电话短信] 号码 ${fromNumber} 发来短信，请直接回复（你的回复会原样回给该号码）。短信内容：${bodyText}`
+          ? `${srcTag} ${selfIntro} [群聊消息] ${fromNumber} 在群里发来消息，请直接回复（回复会原样发回群里）。消息：${bodyText}`
+          : `${srcTag} ${selfIntro} [电话短信] 号码 ${fromNumber} 发来短信，请直接回复（你的回复会原样回给该号码）。短信内容：${bodyText}`
         const ok = await promptSession(sid, prompt)
         if (ok) injected++
         // 无论注入成败都推进游标（避免死循环重试同一条）
