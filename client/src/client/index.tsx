@@ -504,13 +504,14 @@ function PhoneOverlay(): JSX.Element {
       pollGroupMessages(groupId, true)
     } catch {}
   }
-  // 群消息拉取（增量，复用收件箱轮询；群消息带 groupId）
+  // 群消息拉取：用 v2 群历史分页端点（聚合所有成员收件箱，含发送者自己）
+  // —— 不用"自己收件箱过滤"，因为广播已排除发送者，自己发的消息不在自己收件箱，会被 force 全量替换冲掉
   function pollGroupMessages(groupId: string, force = false): void {
     const since = force ? 0 : (groupLastSeq.current[groupId] || 0)
-    fetch(`${PHONE_BASE}/api/v1/phone/messages?did=${encodeURIComponent(AGENT_DID)}&since=${since}`, { headers: { Accept: 'application/json' }, cache: 'no-store' })
+    fetch(`${PHONE_BASE}/api/v1/phone/group/${groupId}/messages?since=${since}&limit=100`, { headers: { Accept: 'application/json' }, cache: 'no-store' })
       .then((r) => r.json())
       .then((d) => {
-        const gm = (d.messages || []).filter((m: any) => m.groupId === groupId)
+        const gm = (d.messages || [])
         if (gm.length) {
           groupLastSeq.current[groupId] = Math.max(...gm.map((m: any) => m.seq || 0), groupLastSeq.current[groupId] || 0)
           const mapped = gm.map((m: any) => ({ fromNumber: m.fromNumber || '对端', text: m.text || '', ts: Date.parse(m.at) || Date.now(), ...(m.agent ? { agent: m.agent } : {}), ...(m.kind ? { kind: m.kind } : {}), ...(m.payload ? { payload: m.payload } : {}), ...(m.status ? { status: m.status } : {}), seq: m.seq }))
