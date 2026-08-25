@@ -638,14 +638,16 @@ function PhoneOverlay(): JSX.Element {
   // 发送群消息（广播；@agent 走投递，@人仅广播提及）返回投递结果供 UI 反馈
   async function sendGroup(from: string, text: string): Promise<{ delivered: string[]; failed: string[]; error?: string }> {
     const res = { delivered: [] as string[], failed: [] as string[], error: undefined as string | undefined }
-    // 发言身份：A 面板 = agent（AGENT_DID）；B 面板 = owner（OWNER_DID，操作人员身份）——各是各的
+    // 发言身份：A 面板 = agent（AGENT_DID）；B 面板 = owner（操作人员）——各是各的
+    // B 面板：owner 已注册 → 用 OWNER_DID；未注册 → 回退号码身份（号码在簿即身份，OWNER_DID 预留）
     const panelIsB = from === 'B'
-    const speakAs = panelIsB ? (OWNER_DID || MINE_NUM.B) : AGENT_DID
-    const speakNumber = panelIsB ? (OWNER_DID || MINE_NUM.B) : MINE_NUM.A
-    // 身份守卫：身份不明不能参与群聊——A 查 agent 注册、B 查 owner 注册（owner 未注册也不能发言）
-    if (panelIsB ? (account.ownerState === 'unregistered') : (account.agentState === 'unregistered')) {
+    const ownerRegistered = account.ownerState === 'registered'
+    const speakAs = panelIsB ? (ownerRegistered && OWNER_DID ? OWNER_DID : MINE_NUM.B) : AGENT_DID
+    const speakNumber = panelIsB ? (ownerRegistered && OWNER_DID ? OWNER_DID : MINE_NUM.B) : MINE_NUM.A
+    // 身份守卫：身份不明不能参与群聊——A 查 agent 注册、B 查 owner 注册（owner 未注册用号码，号码在簿即身份）
+    if (panelIsB ? (account.ownerState === 'unregistered' && !account.numbers.includes(MINE_NUM.B)) : (account.agentState === 'unregistered')) {
       res.error = panelIsB
-        ? '⚠ Owner 身份未注册，不能在群里发言。请先打开「开户」完成 Owner 注册（第 2 步）'
+        ? '⚠ Owner 身份未注册，且号码未开户，不能在群里发言。请先打开「开户」完成注册'
         : '⚠ 身份未注册，不能在群里发言。请先打开「开户」完成 agent 注册（第 1 步）'
       return res
     }
