@@ -837,7 +837,9 @@ function PhoneOverlay(): JSX.Element {
   }
 
   // ── 语音：信令经中继（P2P 媒体 + STUN 打洞）──
-  const ICE = { iceServers: [{ urls: 'stun:compliancehub.cn:3478' }] }
+  // STUN 服务器：默认从 PHONE_BASE 推导（去掉协议 → stun:<host>:3478），可 env DSH_PHONE_STUN 覆盖
+  const stunHost = (typeof process !== 'undefined' && (process as any).env?.DSH_PHONE_STUN) || PHONE_BASE.replace(/^https?:\/\//, '').replace(/\/.*$/, '')
+  const ICE = { iceServers: [{ urls: `stun:${stunHost}:3478` }] }
   const [pc, setPc] = useState<RTCPeerConnection | null>(null)
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
   const voiceRef = { pc: pc, local: localStream, muted: false }

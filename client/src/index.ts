@@ -16,6 +16,8 @@ export const inject = ['sessionQuery', 'webServer']
 const PHONE_BASE = process.env.DSH_PHONE_BASE || 'https://compliancehub.cn'
 const AGENT_DID = process.env.DSH_PHONE_DID || 'did:cha2a:agent:dshlib'
 const AGENT_SHORT = AGENT_DID.split(':').pop() || 'dshlib'
+// 本环境号码（node 半回短信/群的兜底 fromNumber；运行时读 env，缺省同演示配置）
+const NUM_A = (process.env.DSH_PHONE_NUM_A || '+86 95123 0001').replace(/[^0-9+]/g, '')
 const REPLY_INTERVAL = 2500          // 轮询间隔（回复路由时延大头，2.5s）
 const SEEN_MAX = 200                 // 已处理消息去重上限
 // 轮询游标持久化：重启后不重放历史回复（游标按 sid 记录已处理消息数；inbox 记录收件箱 seq）
@@ -106,7 +108,7 @@ export function apply(ctx: Context): void {
         if (seen.size > SEEN_MAX) seen.delete(seen.values().next().value)
 
         // 路由：默认回短信（来源 sms）；replyChannel 配置在此扩展（现在默认 auto = 跟随来源）
-        const src = currentSource || { source: 'sms', fromNumber: '+86 95123 0001' }
+        const src = currentSource || { source: 'sms', fromNumber: NUM_A }
 
         if (src.source === 'sms') {
           // 回短信：agent 身份发回（fromNumber=AGENT_DID 代表 agent，任何电话面板判"收到"左侧）；to 规范化 E.164

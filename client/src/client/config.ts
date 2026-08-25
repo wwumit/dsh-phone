@@ -14,7 +14,6 @@ declare const process: any
 
 export const PHONE_BASE = process.env.DSH_PHONE_BASE || 'https://compliancehub.cn'
 export const AGENT_DID = process.env.DSH_PHONE_DID || 'did:cha2a:agent:dshlib'   // 电话对应的 agent 身份（号码簿绑定）
-export const CALLER_NUM = '+86 95123 0001'          // 主叫 = 电话 A
 export const STORE_URL = 'https://compliancehub.cn/store/'
 
 // 双面板号码（同页两部电话演示）；A/B 可由环境变量覆盖
