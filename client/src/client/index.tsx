@@ -650,7 +650,7 @@ function PhoneOverlay(): JSX.Element {
     }
     if (!currentGroup) return res
     // 提取所有 @ 提及（任意位置：开头/句中/句尾）
-    const mentions = [...new Set([...text.matchAll(/@([\w.-]+)/g)].map((m) => m[1]))]
+    const mentions = [...new Set([...text.matchAll(/@([\w\u4e00-\u9fa5.-]+)/g)].map((m) => m[1]))]
     // @昵称 → 成员 DID 解析：agent 成员可用昵称（metadata.name/author）@，需映射回 DID 才能投递
     // 拉一次 members-detail 建昵称→成员映射（含号码成员 + agent 成员）
     let nickToMember: Record<string, string> = {}
@@ -858,7 +858,7 @@ function PhoneOverlay(): JSX.Element {
       return
     }
     // @agent 投递：文本以 @<agent名> 开头 → resolve→locate→ 投递到 agent 会话（智能体互联网寻址）
-    const m = text && text.match(/^@([\w.-]+)\s+([\s\S]*)$/)
+    const m = text && text.match(/^@([\w\u4e00-\u9fa5.-]+)\s+([\s\S]*)$/)
     if (m && !attachment) {
       const agentName = m[1]
       const content = m[2].trim()

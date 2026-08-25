@@ -196,7 +196,7 @@ export function GroupChatApp(p: AppProps): JSX.Element {
   }
   // @ 高亮：消息文本里 @xxx 着色
   function renderText(text: string): JSX.Element {
-    const parts = text.split(/(@[\w.-]+)/g)
+    const parts = text.split(/(@[\w\u4e00-\u9fa5.-]+)/g)
     return <>{parts.map((part, i) => part.startsWith('@')
       ? <span key={i} style={{ color: '#ffd60a', fontWeight: 600 }}>{part}</span>
       : <span key={i}>{part}</span>)}</>
@@ -243,7 +243,7 @@ export function GroupChatApp(p: AppProps): JSX.Element {
     if (!text) return
     // @agent 校验：@ 的 agent 必须是群成员（群成员是号码/DID 列表）
     // 匹配：agent DID 短名 / 昵称（nickMap）/ 号码成员按 +86 归一（与后端 groups.js 一致：任意位置 @）
-    const mentionedAll = [...new Set([...text.matchAll(/@([\w.-]+)/g)].map((mm) => mm[1]))]
+    const mentionedAll = [...new Set([...text.matchAll(/@([\w\u4e00-\u9fa5.-]+)/g)].map((mm) => mm[1]))]
     if (mentionedAll.length) {
       const normNum = (s: string) => s.replace(/^\+86/, '').replace(/[^0-9]/g, '')
       const notInGroup = mentionedAll.filter((name) => !(cur.members || []).some((mm) =>
