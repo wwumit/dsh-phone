@@ -616,7 +616,8 @@ function PhoneOverlay(): JSX.Element {
   const [call, setCall] = useState<{ stage: 'ringing' | 'connected'; callerId: string; calleeId: string; call?: any; connectedAt: number } | null>(null)
 
   // ── 每部电话独立位置（拖动锚点，屏幕坐标 left/top；localStorage 持久化）──
-  const POS_KEY = 'dsh-phone-pos'
+  // v2：浮标改为胶囊形显示名字后，旧 pos（52px 圆钮时代）不再贴合，升级重置一次
+  const POS_KEY = 'dsh-phone-pos-v2'
   function loadPos(): Record<'A' | 'B', { x: number; y: number }> {
     try {
       const d = JSON.parse(localStorage.getItem(POS_KEY) || '{}')
