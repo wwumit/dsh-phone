@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.1] - 2026-08-26
+
+### Fixed — npm 包完整性
+- 补 `README.md`（含坦诚声明）、`LICENSE`（MIT）、`CHANGELOG.md`
+- 开 dts 生成类型声明：`lib/index.d.ts`（node 半），修正 `types`/`exports` 路径
+- `files` 加入 `lib/index.d.ts` + `CHANGELOG.md`
+
 ## [2.1.0] - 2026-08-25
 
 ### Added — 配置运行时化 + agent profile

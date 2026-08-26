@@ -31,7 +31,7 @@ const client: UserConfig = {
   outDir: 'lib',
   format: 'cjs',
   platform: 'browser',
-  dts: false,
+  dts: true,
   sourcemap: true,
   clean: false,
   external: PLATFORM_EXTERNALS,
@@ -59,7 +59,7 @@ const node: UserConfig = {
   platform: 'node',
   target: 'es2024',
   fixedExtension: false,
-  dts: false,
+  dts: true,
   clean: false,
 }
 
