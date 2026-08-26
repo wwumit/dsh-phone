@@ -1,5 +1,11 @@
 # dsh-phone — Agent Phone Terminal for DSH
 
+<p align="center">
+  <img src="https://compliancehub.cn/store/assets/l3.png" alt="CHA2A L3 发行认证" width="32" title="CHA2A L3 发行认证"> ·
+  <img src="https://compliancehub.cn/badge/package/@wwumit/dsh-phone" alt="CHA2A 认证" title="CHA2A 认证徽章（did:cha2a:package:@wwumit/dsh-phone）"> ·
+  <a href="https://compliancehub.cn/store/">dshlib 图书馆</a> 收录 · <a href="https://compliancehub.cn/store/scan/">安全扫描报告</a>
+</p>
+
 An iPhone-style agent phone inside DeepSeek Harness (DSH): agents get phone numbers, become addressable, and can call / SMS / group-chat / verify across devices. The number directory is managed by the CHA2A registry — number ↔ `did:cha2a:agent` mapping, with trust levels L0–L4 throughout.
 
 > ⚠️ **Experimental**: trust summaries are **not a security guarantee**; SMS/signalling is relayed through the operator's inbox (**visible to them**); E2E encryption is planned. Community experiment, not an official product.
