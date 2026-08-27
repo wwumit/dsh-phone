@@ -12,7 +12,7 @@
 
 ## 安装与版本
 
-当前版本：**2.1.1**（npm：`@wwumit/dsh-phone`）
+当前版本：**2.2.0**（npm：`@wwumit/dsh-phone`）
 
 ```bash
 # 需装到 web profile（依赖 webServer 服务）
