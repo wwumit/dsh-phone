@@ -269,7 +269,7 @@ function PhonePanel(props: {
 
   const ringTone = { idle: '#64748b', ok: '#34d399', warn: t.warn, bad: '#f87171', ring: t.accent }
   const tone: 'idle' | 'ok' | 'warn' | 'bad' | 'ring' =
-    isConnected ? 'ok' : incoming ? (props.call && props.call.call && props.call.call.trust && props.call.call.trust.level > 0 ? 'ok' : 'warn') : 'idle'
+    isConnected ? 'ok' : incoming ? ((props.call.call && props.call.call.trust && (props.call.call.trust.revoked || !props.call.call.trust.active)) ? 'bad' : (props.call.call && props.call.call.trust && props.call.call.trust.level > 0 ? 'ok' : 'warn')) : 'idle'
 
   const shellRadius = t.shape === 'squared' ? 24 : t.shape === 'retro' ? 36 : 42
   const screenRadius = t.shape === 'squared' ? 18 : t.shape === 'retro' ? 28 : 34
@@ -399,6 +399,12 @@ function PhonePanel(props: {
                   <>
                     <div style={{ fontSize: 15, color: '#fff', fontWeight: 600 }}>来电</div>
                     <div style={{ fontSize: 13, color: '#8e8e93' }}>{props.call.callerId === 'A' ? AGENT_LABEL : props.call.callerId === 'B' ? OWNER_LABEL : props.call.callerId}</div>
+                    {/* D9: 撤销/可疑标记——registry resolve 已核验，前端展示（被撤销/未激活/未注册 → 醒目警告） */}
+                    {props.call.call && props.call.call.suspicious && (
+                      <div style={{ fontSize: 12, color: '#ff3b30', fontWeight: 600, background: 'rgba(255,59,48,.15)', padding: '4px 12px', borderRadius: 6 }}>
+                        ⚠ {(props.call.call.trust && props.call.call.trust.revoked) ? '该号码已被撤销' : (props.call.call.trust && !props.call.call.trust.active) ? '该号码未激活' : '未注册/低可信号码'}
+                      </div>
+                    )}
                     <div style={{ display: 'flex', gap: 26 }}>
                       <button onClick={() => props.onAnswer()} style={{ width: 64, height: 64, borderRadius: '50%', background: '#34c759', color: '#fff', border: 0, fontSize: 12, cursor: 'pointer' }}>接听</button>
                       <button onClick={() => props.onHangup()} style={{ width: 64, height: 64, borderRadius: '50%', background: '#ff3b30', color: '#fff', border: 0, fontSize: 12, cursor: 'pointer' }}>挂断</button>
@@ -408,6 +414,12 @@ function PhonePanel(props: {
                   <>
                     <div style={{ fontSize: 15, color: '#fff', fontWeight: 600 }}>呼叫中…</div>
                     <div style={{ fontSize: 13, color: '#8e8e93' }}>{props.call.calleeId === 'A' ? AGENT_LABEL : props.call.calleeId === 'B' ? OWNER_LABEL : props.call.calleeId}</div>
+                    {/* D9: 主叫侧同样提示目标可疑（撤销/未注册） */}
+                    {props.call.call && props.call.call.suspicious && (
+                      <div style={{ fontSize: 12, color: '#ff3b30', fontWeight: 600, background: 'rgba(255,59,48,.15)', padding: '4px 12px', borderRadius: 6 }}>
+                        ⚠ {(props.call.call.trust && props.call.call.trust.revoked) ? '目标已被撤销' : '目标未注册/低可信'}
+                      </div>
+                    )}
                     <button onClick={() => props.onHangup()} style={{ width: 64, height: 64, borderRadius: '50%', background: '#ff3b30', color: '#fff', border: 0, fontSize: 12, cursor: 'pointer' }}>挂断</button>
                   </>
                 ) : isConnected ? (
