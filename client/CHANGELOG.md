@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.2.0] - 2026-08-27
+
+### Added — Agent 身份自证（M1-M3）+ 浏览器端密钥
+- agent 本地生成 Ed25519 密钥对，仅登记公钥到 registry（`agent/key/register`），私钥不出设备
+- 身份文件 `~/.dsh/identity-<did>.json`（chmod 600）：node 半自动开户（无身份文件时静默开户，失败降级 env）
+- 出站签名能力：`agentSign` / `agentHasKey` 导出（RFC 8785 风格 canonicalJson + Ed25519）
+- 浏览器端 `webcrypto.ts`：WebCrypto Ed25519（spki 公钥格式，与 node 半/服务端互通）——P7 SaaS 向导底座
+- 回归：跨端互操作（WebCrypto ↔ node ↔ registry 验签）+ 身份文件闭环验证通过
+
 ## [2.1.1] - 2026-08-26
 
 ### Fixed — npm 包完整性
