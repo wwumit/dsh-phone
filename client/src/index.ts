@@ -9,6 +9,9 @@
 import type { Context } from '@deepseek-ai/cordis'
 import fs from 'fs'
 import path from 'path'
+// 身份/签名模块（node 半专用——依赖 node:crypto；浏览器半不 import，否则打包进 client 会崩）
+import { loadIdentity, createIdentity, markRegistered, identityPath, type AgentIdentity } from './identity'
+import { signPayload } from './sign'
 
 export const name = 'dsh-phone'
 export const inject = ['sessionQuery', 'webServer']
@@ -18,10 +21,25 @@ export const inject = ['sessionQuery', 'webServer']
 const hasProcess = typeof process !== 'undefined' && !!process?.env
 const env = (k: string, d: string) => (hasProcess ? (process.env[k] || d) : d)
 
+// 安全加载身份文件（node 半才有 fs；浏览器半降级 null → env 路径）
+let _identity: AgentIdentity | null = null
+function loadIdentitySafe(did: string): AgentIdentity | null {
+  if (!hasProcess) return null
+  try { _identity = loadIdentity(did); return _identity } catch { return null }
+}
+export function agentHasKey(): boolean { return !!_identity }
+export function agentSign(payload: string | object): string | null {
+  if (!_identity) return null
+  try { return signPayload(payload, _identity.privateKey) } catch { return null }
+}
+
 const PHONE_BASE = env('DSH_PHONE_BASE', 'https://compliancehub.cn')
 // RCS 服务基址：消息/群/附件走 rcs-server（nginx /rcs/ 前缀）
 const RCS_BASE = PHONE_BASE + '/rcs'
-const AGENT_DID = env('DSH_PHONE_DID', 'did:cha2a:agent:dshlib')
+// agent 身份：优先本地身份文件（含私钥，可自证签名）；无则 env 降级（过渡期）
+const ENV_DID = env('DSH_PHONE_DID', 'did:cha2a:agent:dshlib')
+const identity = loadIdentitySafe(ENV_DID)
+const AGENT_DID = identity ? identity.did : ENV_DID
 const AGENT_SHORT = AGENT_DID.split(':').pop() || 'dshlib'
 // 本环境号码（node 半回短信/群的兜底 fromNumber；运行时读 env，缺省同演示配置）
 // 保留原始显示格式（含空格）用于注入给 client；node 半内部用归一化后的 NUM_A/NUM_B
@@ -84,6 +102,39 @@ export function apply(ctx: Context): void {
     () => ctx.webServer.tapIndex((html) => injectPhoneConfig(html, buildPhoneConfig())),
     'dsh-phone: config injection',
   )
+
+  // ── Agent 身份自证（地基）：启动时确保本地身份文件存在，无则自动开户 ──
+  // 静默增强：无身份文件 → 本地生成密钥对 + 登记公钥到 registry + 写身份文件（chmod 600）
+  // 有身份文件或登记失败 → 保持 env 降级路径（不影响现有功能）；失败不阻断启动
+  ctx.effect(() => {
+    if (!hasProcess) return () => {}   // 浏览器半无 fs/process，跳过
+    if (identity) return () => {}      // 已有身份文件，无需开户
+    const doOnboard = async () => {
+      try {
+        const id = createIdentity(AGENT_DID)
+        const res = await fetch(`${PHONE_BASE}/api/v1/agent/key/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ did: AGENT_DID, publicKey: id.publicKey, algorithm: 'Ed25519' }),
+        }).catch(() => null)
+        if (res && res.ok) {
+          const data = await res.json().catch(() => null)
+          if (data && data.registered) {
+            markRegistered(AGENT_DID, data.keyRegisteredAt || new Date().toISOString())
+            _identity = loadIdentity(AGENT_DID)
+            console.log(`[dsh-phone] ✅ agent 身份已开户: ${AGENT_DID}（本地密钥 + registry 公钥登记）`)
+            return
+          }
+        }
+        // 登记失败（409 已登记 / 网络失败）→ 保留本地密钥，env 路径仍工作
+        console.log(`[dsh-phone] ⚠ agent 身份文件已建但公钥登记未完成（registry 稍后可补登记），继续 env 模式`)
+      } catch (e) {
+        console.log(`[dsh-phone] ⚠ agent 开户失败（${String(e).slice(0, 80)}），继续 env 模式`)
+      }
+    }
+    if (hasProcess) { doOnboard() }
+    return () => {}
+  }, 'dsh-phone: agent key onboarding')
 
   // ── Agent 回复转回：读绑定会话最新 assistant 消息 → 按来源路由回电话 ──
   const seen = new Set<string>()
