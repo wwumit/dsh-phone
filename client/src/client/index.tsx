@@ -210,6 +210,9 @@ function PhonePanel(props: {
   registerOwner(displayName: string, author: string): Promise<void>
   loadAccount(): void
   applyAccount(displayName?: string): Promise<void>
+  // 新消息通知横幅（由 PhoneOverlay 轮询触发，经 props 下发到本面板渲染）
+  notif: { key: string; title: string; body: string; jump: () => void } | null
+  onNotifDismiss(): void
 }): JSX.Element {
   const t = props.theme
   const [open, setOpen] = useState(false)
@@ -334,7 +337,7 @@ function PhonePanel(props: {
   return (
     <>
       <button
-        onClick={() => { if (!props.justDragged) { props.onFocus(); setOpen(!open) } }}
+        onClick={() => { if (!props.justDragged) { props.onFocus(); setOpen(true) } }}
         onPointerDown={props.onDragStart}
         style={{ position: 'fixed', left: props.pos.x - 24, top: props.pos.y - 24,
           width: 48, height: 48, borderRadius: '50%',
@@ -355,6 +358,21 @@ function PhonePanel(props: {
         <div style={shellStyle} onClick={() => props.onFocus()}>
           {view === 'home' && <div style={{ width: 84, height: 20, background: '#000', borderRadius: 12, margin: '2px auto 6px', border: '1px solid #1c1c1e' }} />}
           <div style={screenStyle}>
+            {/* 新消息通知横幅（微信式：顶部悬浮，6s 自动消失，点击跳转会话） */}
+            {props.notif && (
+              <div onClick={() => { props.notif!.jump(); props.onNotifDismiss() }}
+                style={{ position: 'absolute', top: 8, left: 10, right: 10, zIndex: 30,
+                  background: 'rgba(28,28,30,.97)', border: '1px solid #3a3a3c', borderRadius: 12,
+                  padding: '9px 12px', display: 'flex', alignItems: 'center', gap: 9,
+                  boxShadow: '0 6px 20px rgba(0,0,0,.55)', cursor: 'pointer' }}>
+                <div style={{ width: 34, height: 34, borderRadius: 9, background: 'linear-gradient(160deg,#0a84ff,#1c3faa)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, flexShrink: 0 }}>💬</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: '#fff' }}>{props.notif.title}</div>
+                  <div style={{ fontSize: 11, color: '#8e8e93', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{props.notif.body}</div>
+                </div>
+                <span style={{ fontSize: 13, color: '#48484a', flexShrink: 0 }}>×</span>
+              </div>
+            )}
             {view === 'home' && (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 14px 0', fontSize: 11, color: '#fff' }}>
                 <button onClick={() => setOpen(false)} title="最小化（关闭浮窗）" aria-label="最小化"
@@ -615,6 +633,17 @@ function PhoneOverlay(): JSX.Element {
   const [currentGroup, setCurrentGroup] = useState<{ groupId: string; name: string; members: string[]; conversationId?: string; createdBy?: string } | null>(null)
   const [groupMsgLog, setGroupMsgLog] = useState<Array<{ from?: string; fromNumber: string; text: string; ts: number; agent?: { did: string; name: string; level: number }; kind?: string; payload?: any; status?: string; seq?: number }>>([])
   const groupLastSeq = useRef<Record<string, number>>({})
+  // 通知横幅用最新 groupList（轮询 effect 依赖不随其重建）
+  const groupListRef = useRef(groupList); groupListRef.current = groupList
+
+  // ── 新消息通知横幅（微信式：轮询到新消息 → 顶部横幅 6s 自动消失，点击跳转会话）──
+  const [notif, setNotif] = useState<{ key: string; title: string; body: string; jump: () => void } | null>(null)
+  const notifTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  function showNotif(n: { key: string; title: string; body: string; jump: () => void }): void {
+    setNotif(n)
+    if (notifTimer.current) clearTimeout(notifTimer.current)
+    notifTimer.current = setTimeout(() => setNotif(null), 6000)
+  }
 
   // 群列表加载（我是成员/创建者）
   function loadGroupList(): void {
@@ -926,7 +955,17 @@ function PhoneOverlay(): JSX.Element {
       } catch { return }
     }
     const body: any = { from: speakAs, fromNumber: speakNumber, to, text: text || undefined, attachment: att ? { fileId: att.fileId, name: att.name, size: att.size, hash: att.hash } : undefined }
-    try { await fetch(`${RCS_BASE}/api/v1/phone/message`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }) } catch { return }
+    // 检查响应状态：402（余额不足）/其他错误必须提示，不能"假成功"（本地显示已发送但实际未发出）
+    try {
+      const r = await fetch(`${RCS_BASE}/api/v1/phone/message`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      if (!r.ok) {
+        let msg = `发送失败（HTTP ${r.status}）`
+        try { const d = await r.json(); if (d && d.error) msg = d.error } catch {}
+        if (r.status === 402) msg = '余额不足，请先充值（群聊页右上「充值」）'
+        alert(msg)
+        return
+      }
+    } catch { alert('发送失败（网络错误）'); return }
     setSmsLog((l) => [...l, { fromNumber: speakNumber, text, attachment: att, ts: Date.now() }])
   }
 
@@ -937,6 +976,32 @@ function PhoneOverlay(): JSX.Element {
         const d = await (await fetch(`${RCS_BASE}/api/v1/phone/messages?did=${encodeURIComponent(AGENT_DID)}&since=${lastSeq}`, { headers: { Accept: 'application/json' }, cache: 'no-store' })).json()
         if (d.messages && d.messages.length) {
           bumpSeq(Math.max(...d.messages.map((m: any) => m.seq || 0)))
+          // 新消息通知（微信式横幅）：排除信令；当前正看对应会话则不弹
+          const fresh = d.messages.filter((m: any) => !m.signal)
+          const latestMsg = fresh.length ? fresh[fresh.length - 1] : null
+          if (latestMsg) {
+            const isGrp = !!latestMsg.groupId
+            // 群消息：当前正看该群则不弹；短信消息：总是弹（轮询在共享层，无 per-panel view 信息）
+            const viewingSame = isGrp && currentGroup?.groupId === latestMsg.groupId
+            if (!viewingSame) {
+              const sender = latestMsg.agent?.name
+                || (latestMsg.fromNumber ? String(latestMsg.fromNumber).replace(/^\+/, '') : String(latestMsg.from || '新消息'))
+              const body = latestMsg.text
+                ? String(latestMsg.text).slice(0, 40) + (String(latestMsg.text).length > 40 ? '…' : '')
+                : latestMsg.attachment ? '📎 附件'
+                : latestMsg.kind === 'card' ? '🃏 卡片消息' : '新消息'
+              const grpName = isGrp ? (groupListRef.current.find((g) => g.groupId === latestMsg.groupId)?.name || '群消息') : null
+              showNotif({
+                key: String(latestMsg.seq || Date.now()),
+                title: isGrp ? (grpName || '群消息') : sender,
+                body: isGrp ? `${sender}：${body}` : body,
+                jump: isGrp
+                  ? async () => { const g = groupListRef.current.find((x) => x.groupId === latestMsg.groupId); if (g) { await openGroup(g.groupId); nav('group-chat') } }
+                  : () => nav('sms'),
+              })
+
+            }
+          }
           // 短信列表：排除信令 + 群消息（群消息有自己的会话流）
           setSmsLog((l) => [...l, ...d.messages.filter((m: any) => !m.signal && !m.groupId).map((m: any) => ({
             fromNumber: m.fromNumber || '对端', text: m.text || undefined,
@@ -965,14 +1030,9 @@ function PhoneOverlay(): JSX.Element {
 
   function onUnlock(name: string): void {
     const th = THEMES[name]
-    if (!th || !th.unlock) return
-    fetch(`${PHONE_BASE}/api/v1/phone/credits/consume`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ did: AGENT_DID, amount: th.unlock, reason: `theme-${name}` }),
-    }).then((r) => r.json()).then((d) => {
-      if (d.ok) { const u = [...unlocked, name]; setUnlocked(u); localStorage.setItem(UNLOCKED_KEY, JSON.stringify(u)); }
-      else alert(d.error || '积分不足')
-    }).catch(() => alert('解锁失败'))
+    if (!th) return
+    // 2026-08-28：积分消费端点已加服务端鉴权（rcs-server 内部专用），主题解锁改为免费本地解锁
+    const u = [...unlocked, name]; setUnlocked(u); localStorage.setItem(UNLOCKED_KEY, JSON.stringify(u))
   }
   function onSelectTheme(id: 'A' | 'B', name: string): void {
     if (id === 'A') { setThemeA(name); localStorage.setItem(THEME_KEY + '-a', name) }
@@ -1242,10 +1302,10 @@ function PhoneOverlay(): JSX.Element {
     <>
       <PhonePanel id="A" label={`${dispName.a} · ${MINE_NUM.A}`} floatLabel={dispName.a} ownNumber={MINE_NUM.A} otherNumber={PEER_NUM.A}
         badgeLevel={3} smsList={smsLog} onSendSms={sendSms} voice={voiceFace}
-        group={{ list: groupList, current: currentGroup, msgs: groupMsgLog, onLoadList: loadGroupList, onCreate: createGroup, onOpen: (gid) => { setCurrentGroup(null); setGroupMsgLog([]); return openGroup(gid) }, onSend: sendGroup, onLeave: leaveGroup, onDisband: disbandGroup, onAnnouncement: setAnnouncement, onBack: () => { setCurrentGroup(null); setGroupMsgLog([]) } }} onReport={reportUsage} theme={themeOf('A')} unlocked={unlocked} onUnlock={onUnlock} onSelectTheme={(n) => onSelectTheme('A', n)} top={topPanel === 'A'} onFocus={() => setTopPanel('A')} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} pos={pos.A} onDragStart={(e) => startDrag('A', e)} justDragged={justDragged} account={account} checkAgentRegistered={checkAgentRegistered} registerAgent={registerAgent} checkOwnerRegistered={checkOwnerRegistered} registerOwner={registerOwner} loadAccount={loadAccount} applyAccount={applyAccount} />
+        group={{ list: groupList, current: currentGroup, msgs: groupMsgLog, onLoadList: loadGroupList, onCreate: createGroup, onOpen: (gid) => { setCurrentGroup(null); setGroupMsgLog([]); return openGroup(gid) }, onSend: sendGroup, onLeave: leaveGroup, onDisband: disbandGroup, onAnnouncement: setAnnouncement, onBack: () => { setCurrentGroup(null); setGroupMsgLog([]) } }} onReport={reportUsage} theme={themeOf('A')} unlocked={unlocked} onUnlock={onUnlock} onSelectTheme={(n) => onSelectTheme('A', n)} top={topPanel === 'A'} onFocus={() => setTopPanel('A')} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} pos={pos.A} onDragStart={(e) => startDrag('A', e)} justDragged={justDragged} account={account} checkAgentRegistered={checkAgentRegistered} registerAgent={registerAgent} checkOwnerRegistered={checkOwnerRegistered} registerOwner={registerOwner} loadAccount={loadAccount} applyAccount={applyAccount} notif={notif} onNotifDismiss={() => setNotif(null)} />
       <PhonePanel id="B" label={`${dispName.b} · ${MINE_NUM.B}`} floatLabel={dispName.b} ownNumber={MINE_NUM.B} otherNumber={PEER_NUM.B}
         badgeLevel={3} smsList={smsLog} onSendSms={sendSms} voice={voiceFace}
-        group={{ list: groupList, current: currentGroup, msgs: groupMsgLog, onLoadList: loadGroupList, onCreate: createGroup, onOpen: (gid) => { setCurrentGroup(null); setGroupMsgLog([]); return openGroup(gid) }, onSend: sendGroup, onLeave: leaveGroup, onDisband: disbandGroup, onAnnouncement: setAnnouncement, onBack: () => { setCurrentGroup(null); setGroupMsgLog([]) } }} onReport={reportUsage} theme={themeOf('B')} unlocked={unlocked} onUnlock={onUnlock} onSelectTheme={(n) => onSelectTheme('B', n)} top={topPanel === 'B'} onFocus={() => setTopPanel('B')} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} pos={pos.B} onDragStart={(e) => startDrag('B', e)} justDragged={justDragged} account={account} checkAgentRegistered={checkAgentRegistered} registerAgent={registerAgent} checkOwnerRegistered={checkOwnerRegistered} registerOwner={registerOwner} loadAccount={loadAccount} applyAccount={applyAccount} />
+        group={{ list: groupList, current: currentGroup, msgs: groupMsgLog, onLoadList: loadGroupList, onCreate: createGroup, onOpen: (gid) => { setCurrentGroup(null); setGroupMsgLog([]); return openGroup(gid) }, onSend: sendGroup, onLeave: leaveGroup, onDisband: disbandGroup, onAnnouncement: setAnnouncement, onBack: () => { setCurrentGroup(null); setGroupMsgLog([]) } }} onReport={reportUsage} theme={themeOf('B')} unlocked={unlocked} onUnlock={onUnlock} onSelectTheme={(n) => onSelectTheme('B', n)} top={topPanel === 'B'} onFocus={() => setTopPanel('B')} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} pos={pos.B} onDragStart={(e) => startDrag('B', e)} justDragged={justDragged} account={account} checkAgentRegistered={checkAgentRegistered} registerAgent={registerAgent} checkOwnerRegistered={checkOwnerRegistered} registerOwner={registerOwner} loadAccount={loadAccount} applyAccount={applyAccount} notif={notif} onNotifDismiss={() => setNotif(null)} />
     </>
   )
 }

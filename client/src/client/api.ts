@@ -24,7 +24,7 @@ async function reqBase<T>(base: string, path: string, init?: RequestInit): Promi
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT)
   try {
-    const r = await fetch(`${base}${path}`, { ...init, signal: ctrl.signal, headers: { Accept: 'application/json', ...(init?.headers || {}) } })
+    const r = await fetch(`${base}${path}`, { ...init, signal: ctrl.signal, headers: { Accept: 'application/json', ...(init?.headers || {}) }, cache: 'no-store' })
     if (!r.ok) {
       let msg = `HTTP ${r.status}`
       try { const d = await r.json(); if (d?.error) msg = d.error } catch {}
@@ -55,12 +55,22 @@ export const api = {
     }),
   /** 积分余额 */
   credits: (did = AGENT_DID) => req<{ credits?: number }>(`/api/v1/phone/credits?did=${encodeURIComponent(did)}`),
-  /** 消耗积分（解锁主题等） */
-  consumeCredits: (amount: number, reason: string) =>
-    req<{ ok?: boolean; error?: string }>('/api/v1/phone/credits/consume', {
+
+  // ── 充值（X402 微信支付；金额由服务端定价表决定，客户端只传套餐）──
+  /** 充值下单：返回微信 Native 收款码链接（code_url，需渲染成二维码） */
+  purchase: (pack: 'starter' | 'standard') =>
+    req<{ ok?: boolean; out_trade_no?: string; code_url?: string; amount_cents?: number; credits?: number; base?: number; bonus?: number; error?: string }>('/api/v1/phone/credits/purchase', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ did: AGENT_DID, amount, reason }),
+      body: JSON.stringify({ did: AGENT_DID, pack }),
     }),
+  /** 确认支付并入账（幂等）：status SUCCESS=已到账 / PENDING=未支付，轮询调用 */
+  confirmPayment: (outTradeNo: string) =>
+    req<{ ok?: boolean; status?: string; credited?: boolean; balance?: number; message?: string; error?: string }>('/api/v1/phone/credits/confirm', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ did: AGENT_DID, out_trade_no: outTradeNo }),
+    }),
+  /** 账单流水（最近 50 条） */
+  ledger: (did = AGENT_DID) => req<{ entries?: Array<{ did: string; type: string; amount: number; reason: string; at: string }> }>(`/api/v1/phone/credits/ledger?did=${encodeURIComponent(did)}`),
 
   // ── 消息中继（短信/附件）──
   /** 发送短信 */

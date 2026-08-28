@@ -3,10 +3,11 @@
  * GroupChatApp — RCS 群会话（消息流 + @agent）
  * 数据来自 data.group（共享），动作走 actions.group*
  */
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { type AppProps } from '../apps'
 import { AppBar } from '../theme'
 import { PHONE_BASE, RCS_BASE, AGENT_DID, agentKey } from '../config'
+import { api } from '../api'
 
 // 群已读游标（localStorage：groupId → 已读 seq；未读数 = lastMsgSeq - readSeq；按 DID 命名空间化）
 const READ_KEY = agentKey('group-read')
@@ -23,6 +24,11 @@ export function GroupApp(p: AppProps): JSX.Element {
   const [creating, setCreating] = useState(false)
   // 已读游标快照（打开群后刷新群列表会触发重渲染，这里一次性读）
   const readSnap = loadRead()
+  // 余额角标（独立查询，不依赖 account 状态刷新链路）
+  const [credits, setCredits] = useState<number | null>(null)
+  useEffect(() => {
+    api.credits().then((d) => setCredits(typeof d.credits === 'number' ? d.credits : null)).catch(() => {})
+  }, [])
   // 打开群：标记已读并刷新列表（角标立即消除）
   async function openAndRead(g: { groupId: string }): Promise<void> {
     await actions.openGroup(g.groupId)
@@ -49,6 +55,10 @@ export function GroupApp(p: AppProps): JSX.Element {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <AppBar title="群聊" onBack={back} theme={t} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+        <span style={{ fontSize: 11, color: t.warn }}>🪙 {credits === null ? '…' : credits.toLocaleString()} 额度</span>
+        <button onClick={() => nav('recharge')} style={{ marginLeft: 'auto', padding: '4px 14px', borderRadius: 999, background: t.accent, color: '#fff', border: 0, fontSize: 11, cursor: 'pointer' }}>充值</button>
+      </div>
       <div style={{ flex: 1, overflowY: 'auto', marginBottom: 6, background: '#0c0c0e', borderRadius: 12, padding: 8 }}>
         {data.group.list.length === 0
           ? <div style={{ fontSize: 12, color: t.muted }}>暂无群（点刷新加载）</div>
@@ -155,15 +165,16 @@ export function GroupChatApp(p: AppProps): JSX.Element {
   }, [data.group.msgs.length])
   const [nickMap, setNickMap] = useState<Record<string, { nickname: string; type: 'phone' | 'agent'; level: number; capabilities?: string[] }>>({})
   const cur = data.group.current
-  if (!cur) return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.muted, fontSize: 12 }}>群不存在</div>
   // 消息列表自动滚动到底部（新消息进来 / 打开群时）
   const msgBoxRef = React.useRef<HTMLDivElement>(null)
   React.useEffect(() => {
+    if (!cur) return
     if (msgBoxRef.current) msgBoxRef.current.scrollTop = msgBoxRef.current.scrollHeight
-  }, [data.group.msgs.length, cur.groupId])
+  }, [data.group.msgs.length, cur?.groupId])
 
   // 拉取成员详情（昵称/类型/等级）→ 建映射（member 原文 → 呈现信息）
   React.useEffect(() => {
+    if (!cur) return
     fetch(`${RCS_BASE}/api/v1/phone/group/${cur.groupId}/members-detail`, { headers: { Accept: 'application/json' } })
       .then((r) => r.json())
       .then((d) => {
@@ -181,7 +192,9 @@ export function GroupChatApp(p: AppProps): JSX.Element {
       const r = loadRead()
       if ((r[cur.groupId] || 0) < seq) { r[cur.groupId] = seq; saveRead(r) }
     }
-  }, [cur.groupId])
+  }, [cur?.groupId])
+  // cur 为 null（会话未就绪）时渲染空态——必须在所有 hooks 之后（hooks 数量恒定，防 React 崩溃）
+  if (!cur) return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.muted, fontSize: 12 }}>群不存在</div>
 
   // 消息发送者昵称：优先成员详情映射（成员 key 或归一化号码）；owner DID → owner 名；回退短号
   function senderName(fromNumber: string): { name: string; type: 'phone' | 'agent'; level: number } {
@@ -260,10 +273,17 @@ export function GroupChatApp(p: AppProps): JSX.Element {
       if (notInGroup.length) { setSendErr(`⚠ ${notInGroup.join('、')} 不在本群，无法 @`); return }
     }
     setSendErr('')
-    setGroupInput('')
     setAtQuery(null)
     actions.reportUsage('group_msgs', 1)
-    const res = await actions.sendGroup(p.id === 'A' ? 'A' : 'B', text)
+    // 发送失败（网络/余额不足 402）保留草稿并提示；成功后才清空输入
+    let res: any = null
+    try {
+      res = await actions.sendGroup(p.id === 'A' ? 'A' : 'B', text)
+    } catch (e: any) {
+      setSendErr(`⛔ ${e?.message || '发送失败（网络错误或余额不足）'}`)
+      return
+    }
+    setGroupInput('')
     // 信任门禁/广播错误（如 @agent 等级低于门禁）优先显示
     if (res && res.error) setSendErr(`⛔ ${res.error}`)
     // 投递反馈：@了 agent 时提示送达/失败（回复异步回来，这里只确认投递）

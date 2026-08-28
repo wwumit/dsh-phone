@@ -237,7 +237,7 @@ export function ThemeApp(p: AppProps): JSX.Element {
           const active = data.theme.name === th.name
           return (
             <div key={th.name} onClick={() => {
-              if (locked) { if (confirm(`解锁「${th.label}」需 ${th.unlock} 积分？`)) actions.unlock(th.name) }
+              if (locked) { if (confirm(`解锁「${th.label}」？`)) actions.unlock(th.name) }
               else actions.selectTheme(th.name)
             }}
               style={{ display: 'flex', alignItems: 'center', gap: 8, background: t.card, border: active ? `2px solid ${t.accent}` : `1px solid ${t.border}`,
@@ -245,7 +245,7 @@ export function ThemeApp(p: AppProps): JSX.Element {
               <div style={{ width: 26, height: 26, borderRadius: 8, background: `linear-gradient(135deg, ${th.shell}, ${th.accent})`, border: `1px solid ${th.border}` }} />
               <span style={{ flex: 1, fontSize: 13, color: t.text }}>{th.label}</span>
               {locked
-                ? <span style={{ fontSize: 11, color: t.warn }}>🪙 {th.unlock} 积分 · 点击解锁</span>
+                ? <span style={{ fontSize: 11, color: t.warn }}>🔓 点击解锁</span>
                 : active
                   ? <span style={{ fontSize: 11, color: t.ok }}>● 使用中</span>
                   : <span style={{ fontSize: 11, color: t.sub }}>点击切换</span>}
