@@ -8,6 +8,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import fs from 'fs'
+import http from 'node:http'
 import path from 'path'
 // 身份/签名模块（node 半专用——依赖 node:crypto；浏览器半不 import，否则打包进 client 会崩）
 import { loadIdentity, createIdentity, markRegistered, identityPath, type AgentIdentity } from './identity'
@@ -59,7 +60,10 @@ interface PhoneRuntimeConfig {
   agentDid: string
   numA: string
   numB: string
+  signPort?: number   // node 半签名服务端口（回环；缺省时 client 用默认 8098）
 }
+// 签名服务端口（回环仅本机；env 可覆盖，防端口冲突）
+const SIGN_PORT = parseInt(env('DSH_PHONE_SIGN_PORT', '8098'), 10) || 8098
 function buildPhoneConfig(): PhoneRuntimeConfig {
   return {
     registryBase: PHONE_BASE,
@@ -67,6 +71,7 @@ function buildPhoneConfig(): PhoneRuntimeConfig {
     agentDid: AGENT_DID,
     numA: RAW_NUM_A,
     numB: RAW_NUM_B,
+    signPort: SIGN_PORT,
   }
 }
 // 照 DSH 官方 dsh-client-modules 的 injectBootManifest 写法：JSON 转义 < 后注入 <head>
@@ -135,6 +140,43 @@ export function apply(ctx: Context): void {
     if (hasProcess) { doOnboard() }
     return () => {}
   }, 'dsh-phone: agent key onboarding')
+
+  // ── 签名服务（回环，仅本机）：client 请求 agent 私钥签名（私钥不出 node 半）──
+  // 用途：跨 agent 场景「发二维码」——B 侧签订单 payload，A 侧验签可防二维码被替换。
+  // 实现：零依赖 node http；CORS 放行（DSH 页面源跨端口调本端点）；POST /sign {payload} → {signature}
+  if (hasProcess && identity) {
+    const signServer = http.createServer((req, res) => {
+      res.setHeader('Access-Control-Allow-Origin', '*')
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+      res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
+      if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return }
+      if (req.method === 'POST' && (req.url || '').startsWith('/sign')) {
+        let body = ''
+        req.on('data', (c) => { body += c })
+        req.on('end', () => {
+          try {
+            const parsed = JSON.parse(body || '{}')
+            const sig = agentSign(parsed.payload)
+            if (!sig) {
+              res.writeHead(500, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ error: 'no identity key' }))
+              return
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ ok: true, signature: sig }))
+          } catch (e: any) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: String(e?.message || e) }))
+          }
+        })
+        return
+      }
+      res.writeHead(404, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'not found' }))
+    })
+    signServer.listen(SIGN_PORT, '127.0.0.1')
+    ctx.on('dispose', () => { try { signServer.close() } catch {} })
+  }
 
   // ── Agent 回复转回：读绑定会话最新 assistant 消息 → 按来源路由回电话 ──
   const seen = new Set<string>()

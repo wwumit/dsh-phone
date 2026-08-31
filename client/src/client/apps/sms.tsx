@@ -6,7 +6,8 @@ import React, { useRef, useState } from 'react'
 import { type AppProps } from '../apps'
 import { AppBar } from '../theme'
 import { api } from '../api'
-import { PHONE_BASE } from '../config'
+import { PHONE_BASE, AGENT_DID } from '../config'
+import { RechargeSigBadge } from './recharge-badge'
 
 export function SmsApp(p: AppProps): JSX.Element {
   const { t, data, actions, back } = p
@@ -82,7 +83,8 @@ export function SmsApp(p: AppProps): JSX.Element {
     } catch {}
   }
 
-  const isMine = (m: any) => m.fromNumber === data.ownNumber
+  // v2.4.1：本机 agent 的回复（fromNumber=AGENT_DID）也算"我"（右侧）——dshlib 手机上 dshlib 的回信在右侧
+  const isMine = (m: any) => m.fromNumber === data.ownNumber || m.fromNumber === AGENT_DID
   const mySms = data.smsList.filter(isMine)
   const peerSms = data.smsList.filter((m: any) => !isMine(m))
   // 消息列表自动滚动到底部（新消息进来 / 打开时）
@@ -111,6 +113,7 @@ export function SmsApp(p: AppProps): JSX.Element {
                 </span>
               ) : m.text}
             </span>
+            <RechargeSigBadge payload={m.payload} from={m.from} />
           </div>
         ))}
       </div>

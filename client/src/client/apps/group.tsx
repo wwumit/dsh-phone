@@ -7,6 +7,7 @@ import React, { useEffect, useState } from 'react'
 import { type AppProps } from '../apps'
 import { AppBar } from '../theme'
 import { PHONE_BASE, RCS_BASE, AGENT_DID, agentKey } from '../config'
+import { RechargeSigBadge } from './recharge-badge'
 import { api } from '../api'
 
 // 群已读游标（localStorage：groupId → 已读 seq；未读数 = lastMsgSeq - readSeq；按 DID 命名空间化）
@@ -307,7 +308,8 @@ export function GroupChatApp(p: AppProps): JSX.Element {
             // （群聊里 @dshlib 的是别人，dshlib 的回复是"对方 agent"，不是用户自己发的）
             // owner（B 面板）发言：from=OWNER_DID 也算"我"（操作人员身份）
             const norm = (s: string) => String(s || '').replace(/[^0-9+]/g, '')
-            const mine = (!!m.fromNumber && !m.agent && norm(m.fromNumber) === norm(data.ownNumber)) || (m.from === data.ownerDid && !m.agent)
+            // v2.4.1：本机 agent（AGENT_DID）的回复 = 自己发言（右侧）——dshlib 手机上 dshlib 的群回复应在右侧
+            const mine = (!!m.fromNumber && !m.agent && norm(m.fromNumber) === norm(data.ownNumber)) || (m.from === data.ownerDid && !m.agent) || (!!m.agent && m.agent.did === AGENT_DID)
             const sn = senderName(m.fromNumber || '')
             // v2 多 agent：优先用消息自带 agent 字段（node 半回复归属），回退成员映射
             const agentInfo = m.agent || (sn.type === 'agent' ? { did: '', name: sn.name, level: sn.level } : null)
@@ -342,6 +344,7 @@ export function GroupChatApp(p: AppProps): JSX.Element {
                     )
                     : renderText(m.text || '')}
                 </div>
+                <RechargeSigBadge payload={m.payload} from={m.from} />
                 <div style={{ fontSize: 8, color: t.muted, marginTop: 2, padding: '0 2px' }}>
                   {m.ts ? new Date(m.ts).toTimeString().slice(0, 5) : ''}{m.status === 'recalled' ? ' · 已撤回' : ''}
                 </div>

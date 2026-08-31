@@ -277,8 +277,9 @@ function PhonePanel(props: {
   const shellRadius = t.shape === 'squared' ? 24 : t.shape === 'retro' ? 36 : 42
   const screenRadius = t.shape === 'squared' ? 18 : t.shape === 'retro' ? 28 : 34
   // 浮窗跟随图标位置（不限制边界，支持把整个浮窗拖到浏览器可视范围之外/跨屏）
+  // 手机容器：视口居中弹出（截图/演示友好；浮标拖动不再影响手机画面位置）
   const shellStyle: React.CSSProperties = {
-    position: 'fixed', left: props.pos.x - 165, top: props.pos.y - 760, width: 330,
+    position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', width: 330,
     background: t.shell, borderRadius: shellRadius, border: `2px solid ${props.top ? t.accent : t.border}`,
     boxShadow: '0 20px 60px rgba(0,0,0,.6)', padding: '8px 8px 12px', zIndex: props.top ? 1100 : 1000, fontFamily: t.font,
   }
@@ -337,7 +338,7 @@ function PhonePanel(props: {
   return (
     <>
       <button
-        onClick={() => { if (!props.justDragged) { props.onFocus(); setOpen(true) } }}
+        onClick={() => { if (!props.justDragged) { props.onFocus(); setOpen(!open) } }}
         onPointerDown={props.onDragStart}
         style={{ position: 'fixed', left: props.pos.x - 24, top: props.pos.y - 24,
           width: 48, height: 48, borderRadius: '50%',
@@ -823,16 +824,17 @@ function PhoneOverlay(): JSX.Element {
       if (scroll) box = scroll.getBoundingClientRect()
     } catch {}
     if (box && box.width > 100 && box.height > 100) {
-      // 对话框内部右上（右侧偏上，避开输入区）；A/B 并排，B 靠左一点
+      // 对话框底部中间（截图/演示友好：浮标在画面下方居中，手机容器视口居中弹出）
+      const cx = box.left + box.width / 2
       return {
-        A: { x: box.right - 56, y: box.top + 90 },
-        B: { x: box.right - 116, y: box.top + 90 },
+        A: { x: cx + 30, y: box.bottom - 30 },
+        B: { x: cx - 30, y: box.bottom - 30 },
       }
     }
-    // 回退：窗口右侧上部（无对话区时）
+    // 回退：窗口底部中间（无对话区时）
     return {
-      A: { x: window.innerWidth - 90, y: window.innerHeight * 0.22 },
-      B: { x: window.innerWidth - 150, y: window.innerHeight * 0.22 },
+      A: { x: window.innerWidth / 2 + 30, y: window.innerHeight - 30 },
+      B: { x: window.innerWidth / 2 - 30, y: window.innerHeight - 30 },
     }
   }
   function loadPos(): Record<'A' | 'B', { x: number; y: number }> {
@@ -1021,6 +1023,9 @@ function PhoneOverlay(): JSX.Element {
           // 信令消息（语音 offer/answer/candidate）→ 处理
           for (const m of d.messages) { if (m.signal) handleSignal(m) }
         }
+        // 群消息实时性：广播排除发送者（自己发的群消息不在自己收件箱），当前打开群时增量拉群历史
+        // ——否则 agent（node 半）的回复/自己发的群消息要刷新（重开群全量）才显示
+        if (currentGroup) pollGroupMessages(currentGroup.groupId)
       } catch {}
     }
     poll()

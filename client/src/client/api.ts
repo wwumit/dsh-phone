@@ -74,10 +74,10 @@ export const api = {
 
   // ── 消息中继（短信/附件）──
   /** 发送短信 */
-  sendMessage: (fromNumber: string, to: string, text?: string, attachment?: { fileId?: string; name?: string; size?: number; hash?: string }) =>
+  sendMessage: (fromNumber: string, to: string, text?: string, attachment?: { fileId?: string; name?: string; size?: number; hash?: string }, payload?: Record<string, unknown>) =>
     reqRcs<any>('/api/v1/phone/message', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: AGENT_DID, fromNumber, to, text, attachment }),
+      body: JSON.stringify({ from: AGENT_DID, fromNumber, to, text, attachment, ...(payload ? { payload } : {}) }),
     }),
   /** 增量拉取收件箱（seq 游标） */
   messages: (since = 0) => reqRcs<{ messages?: Array<any> }>(`/api/v1/phone/messages?did=${encodeURIComponent(AGENT_DID)}&since=${since}`),

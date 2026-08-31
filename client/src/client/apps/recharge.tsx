@@ -12,6 +12,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { type AppProps } from '../apps'
 import { AppBar } from '../theme'
 import { api } from '../api'
+import { SIGN_PORT, NUM_A, NUM_B } from '../config'
 import qrcode from 'qrcode-generator'
 
 const PACKS = [
@@ -28,7 +29,7 @@ export function RechargeApp(p: AppProps): JSX.Element {
   const { t, back } = p
   const [balance, setBalance] = useState<number | null>(null)
   const [step, setStep] = useState<Step>('idle')
-  const [order, setOrder] = useState<{ outTradeNo: string; credits: number; cents: number } | null>(null)
+  const [order, setOrder] = useState<{ outTradeNo: string; credits: number; cents: number; codeUrl?: string } | null>(null)
   const [qrUrl, setQrUrl] = useState('')
   const [err, setErr] = useState('')
   const [msg, setMsg] = useState('')
@@ -73,7 +74,7 @@ export function RechargeApp(p: AppProps): JSX.Element {
       qr.addData(d.code_url)
       qr.make()
       setQrUrl(qr.createDataURL(4, 8))
-      setOrder({ outTradeNo: d.out_trade_no, credits: d.credits || 0, cents: d.amount_cents || 0 })
+      setOrder({ outTradeNo: d.out_trade_no, credits: d.credits || 0, cents: d.amount_cents || 0, codeUrl: d.code_url || '' })
       setStep('paying')
       startPoll(d.out_trade_no)
     } catch (e: any) {
@@ -89,6 +90,46 @@ export function RechargeApp(p: AppProps): JSX.Element {
       if (d.credited) { setMsg(`✅ 充值成功，已到账 ${typeof d.balance === 'number' ? d.balance.toLocaleString() : ''} 额度`); setStep('done'); refreshBalance() }
       else setErr(d.message || '仍未检测到支付，请确认已扫码付款')
     }).catch(() => setErr('确认失败，请重试'))
+  }
+
+  // 跨 agent 演示：把本机充值二维码作为图片附件发给对端（A/B 面板或群），
+  // 对方收到后呈现，主人扫码 → 本机 confirm 轮询 → 积分到账
+  function sendQr(): void {
+    if (!qrUrl || !order) return
+    setErr(''); setMsg('')
+    ;(async () => {
+      try {
+        // 1. 上传二维码图片，拿服务端 SHA-256 hash（签名绑定的图片内容标识）
+        const b64 = qrUrl.split(',')[1]
+        const up = await api.uploadAttachment('recharge-qr.png', 'image/png', b64)
+        if (!up.ok || !up.fileId || !up.hash) { setErr('附件上传失败，无法生成防替换签名'); return }
+        // 2. 构造订单级 payload 并请求签名（node 半私钥，浏览器不接触私钥）
+        const payload = {
+          action: 'recharge-qr',
+          outTradeNo: order.outTradeNo,
+          amountCents: order.cents,
+          codeUrl: order.codeUrl || '',
+          attachmentHash: up.hash,
+          ts: Date.now(),
+        }
+        const signResp = await fetch(`http://127.0.0.1:${SIGN_PORT}/sign`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ payload }),
+        })
+        const signData = await signResp.json().catch(() => null)
+        if (!signData?.ok || !signData.signature) { setErr('签名服务不可用（node 半签名服务未启动？）'); return }
+        // 3. 发送（attachment + payload 携带签名）
+        const fromNum = p.id === 'A' ? NUM_A : NUM_B
+        await api.sendMessage(
+          fromNum,
+          p.data.otherNumber,
+          `【收款码·已签名】扫码支付 ¥${(order.cents / 100).toFixed(2)} → ${order.credits} 额度（订单 ${order.outTradeNo}）`,
+          { fileId: up.fileId, name: 'recharge-qr.png', size: up.size || 0, hash: up.hash },
+          { ...payload, signature: signData.signature },
+        )
+        setMsg(`✅ 已签名收款码发送给 ${p.data.otherNumber}（附件 SHA-256 + 订单签名，防替换）`)
+      } catch (e: any) { setErr(`发送失败：${e?.message || '未知错误'}`) }
+    })()
   }
 
   return (
@@ -116,7 +157,10 @@ export function RechargeApp(p: AppProps): JSX.Element {
             <div style={{ fontSize: 13, color: '#fff', marginBottom: 8 }}>微信扫码支付 ¥{(order.cents / 100).toFixed(2)} · {order.credits} 额度</div>
             {qrUrl && <img src={qrUrl} alt="微信收款码" style={{ width: 168, height: 168, borderRadius: 8, display: 'block', margin: '0 auto' }} />}
             <div style={{ fontSize: 10, color: t.muted, marginTop: 8 }}>支付成功后自动到账；超时可用下方按钮手动确认</div>
-            <button onClick={manualConfirm} style={{ marginTop: 8, padding: '7px 16px', borderRadius: 999, background: t.accent, color: '#fff', border: 0, fontSize: 12, cursor: 'pointer' }}>我已支付</button>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 8 }}>
+              <button onClick={sendQr} style={{ padding: '7px 14px', borderRadius: 999, background: t.ok, color: '#fff', border: 0, fontSize: 12, cursor: 'pointer' }}>📤 发二维码给对端</button>
+              <button onClick={manualConfirm} style={{ padding: '7px 16px', borderRadius: 999, background: t.accent, color: '#fff', border: 0, fontSize: 12, cursor: 'pointer' }}>我已支付</button>
+            </div>
           </div>
         )}
         {step === 'ordering' && <div style={{ textAlign: 'center', color: t.sub, fontSize: 12, padding: 10 }}>正在下单…</div>}

@@ -13,6 +13,7 @@ interface PhoneRuntimeConfig {
   registryBase: string
   rcsBase: string
   agentDid: string
+  signPort?: number
   numA: string
   numB: string
 }
@@ -52,6 +53,9 @@ export const MINE_NUM = {
 export const PEER_NUM = { A: MINE_NUM.B, B: MINE_NUM.A } as Record<'A' | 'B', string>
 export const NUM_A = MINE_NUM.A.replace(/[^0-9+]/g, '')
 export const NUM_B = MINE_NUM.B.replace(/[^0-9+]/g, '')
+
+// 本机签名服务端口（node 半提供；跨 agent 场景签订单 payload 用）
+export const SIGN_PORT = typeof INJ.signPort === 'number' ? INJ.signPort : 8098
 
 // 本地存储 key（设备态）——按 agent DID 命名空间化：设备通用、切号零痕迹（微信模型）。
 // 键名含 DID（含冒号，localStorage 键名允许）；node 半文件名需另做安全化（见 src/index.ts）。

@@ -5,3 +5,7 @@ lib/
 
 # 内部调试实录（本地认知，不上传）
 docs/跨公网语音调试实录.md
+
+# 内部计划文档（不公开）
+client/VERSION_PLAN.md
+client/EXPERIMENT_PLAN.md

@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.5.0] - 2026-09-01
+
+### Added
+- **充值发码签名（防替换）**：B 侧 `sendQr` 调 node 半签名服务（回环 8098，`POST /sign`，Ed25519 #agent-key 私钥）签订单级 payload（订单/金额/codeUrl/附件hash/ts）；签名随消息 payload 发出
+- **A 侧验签徽章**：收码消息自动 resolve 发送方 DID → 取 #agent-key（multibase+multicodec）→ WebCrypto 验签 + 查信任等级/撤销 → 显示「✓ 已验签·订单xxx」或「⚠ 验签失败·疑似被替换·勿扫码」
+- **webcrypto.ts**：base58btc 解码 + raw Ed25519 验签原语（与 node 半/registry 格式对齐）
+- **浮标默认底部中间 + 手机容器视口居中**（截图/演示友好；拖动仍可自定义位置）
+
+### Fixed
+- **本机 agent 回复显示在左侧**：群消息 mine 判定加 `m.agent.did === AGENT_DID`；短信 isMine 加 `fromNumber === AGENT_DID`——dshlib 手机上 dshlib 的回复显示右侧（其他 agent 回复仍左侧）
+- **浮标收起**：点浮标恢复 toggle（打开/收起；此前改成只开不关）——展开后点浮标可收起
+- **agent 回复不实时出现在群聊**：广播排除发送者导致自己/agent 发的群消息不在自己收件箱，inbox 轮询拉不到、只能刷新才见 → 当前打开群时轮询顺带增量拉群历史（group/:id/messages?since=）
+
 ## [2.4.0] - 2026-08-28（已发布 npm）
 
 ### Added — 额度充值（X402 微信支付）+ 402 体验修复

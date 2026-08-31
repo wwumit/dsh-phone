@@ -68,3 +68,40 @@ export async function verifyPayloadWeb(payload: string | object, signatureB64: s
     return false
   }
 }
+
+/** base58btc 解码（DID Document #agent-key 的 publicKeyMultibase 用：z 前缀 + base58btc 32B raw） */
+const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+export function base58Decode(input: string): Uint8Array {
+  let raw = input
+  if (raw.startsWith('z')) raw = raw.slice(1)
+  const bytes = [0]
+  for (const ch of raw) {
+    const v = BASE58_ALPHABET.indexOf(ch)
+    if (v === -1) throw new Error('invalid base58 char')
+    let carry = v
+    for (let i = 0; i < bytes.length; i++) {
+      carry += bytes[i] * 58
+      bytes[i] = carry & 0xff
+      carry >>= 8
+    }
+    while (carry) { bytes.push(carry & 0xff); carry >>= 8 }
+  }
+  // 处理前导 '1'（= 0）
+  let zeros = 0
+  for (const ch of raw) { if (ch === '1') zeros++; else break }
+  const out = new Uint8Array(zeros + bytes.length)
+  out.fill(0, 0, zeros)
+  for (let i = 0; i < bytes.length; i++) out[zeros + i] = bytes[bytes.length - 1 - i]
+  return out
+}
+
+/** 用 raw 32B Ed25519 公钥验签（DID Document #agent-key multibase 解码后） */
+export async function verifyPayloadWebRaw(payload: string | object, signatureB64: string, rawKey32: Uint8Array): Promise<boolean> {
+  const payloadStr = typeof payload === 'string' ? payload : canonicalJson(payload)
+  try {
+    const key = await crypto.subtle.importKey('raw', rawKey32, { name: 'Ed25519' }, false, ['verify'])
+    return await crypto.subtle.verify('Ed25519', key, base64ToBuf(signatureB64), new TextEncoder().encode(payloadStr))
+  } catch {
+    return false
+  }
+}
