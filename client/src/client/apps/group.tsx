@@ -13,7 +13,7 @@ import { api } from '../api'
 // 群已读游标（localStorage：groupId → 已读 seq；未读数 = lastMsgSeq - readSeq；按 DID 命名空间化）
 const READ_KEY = agentKey('group-read')
 function loadRead(): Record<string, number> { try { return JSON.parse(localStorage.getItem(READ_KEY) || '{}') } catch { return {} } }
-function saveRead(segs: Record<string, number>): void { localStorage.setItem(READ_KEY, JSON.stringify(segs)) }
+function saveRead(segs: Record<string, number>): void { try { localStorage.setItem(READ_KEY, JSON.stringify(segs)) } catch {} }
 
 export function GroupApp(p: AppProps): JSX.Element {
   const { t, data, actions, nav, back } = p

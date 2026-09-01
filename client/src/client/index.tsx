@@ -459,8 +459,8 @@ function PhonePanel(props: {
 
 function PhoneOverlay(): JSX.Element {
   const [topPanel, setTopPanel] = useState<'A' | 'B' | null>(null)
-  const [themeA, setThemeA] = useState<string>(() => localStorage.getItem(THEME_KEY + '-a') || 'classic')
-  const [themeB, setThemeB] = useState<string>(() => localStorage.getItem(THEME_KEY + '-b') || 'classic')
+  const [themeA, setThemeA] = useState<string>(() => { try { return localStorage.getItem(THEME_KEY + '-a') || 'classic' } catch { return 'classic' } })
+  const [themeB, setThemeB] = useState<string>(() => { try { return localStorage.getItem(THEME_KEY + '-b') || 'classic' } catch { return 'classic' } })
   const [unlocked, setUnlocked] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem(UNLOCKED_KEY) || '[]') } catch { return [] } })
   function themeOf(id: 'A' | 'B'): Theme { return THEMES[(id === 'A' ? themeA : themeB)] || THEMES.classic }
   // ── 浮标显示名（注册名优先；无则通用占位——不硬编码任何主人专属名）──
@@ -658,7 +658,7 @@ function PhoneOverlay(): JSX.Element {
     try {
       const r = await (await fetch(`${RCS_BASE}/api/v1/phone/group`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, creator: AGENT_DID, members }),
+        body: JSON.stringify({ name, creator: AGENT_DID, members: members.includes(AGENT_DID) ? members : [...members, AGENT_DID] }),
       })).json()
       if (r && r.ok && r.groupId) {
         loadGroupList()
@@ -1037,11 +1037,11 @@ function PhoneOverlay(): JSX.Element {
     const th = THEMES[name]
     if (!th) return
     // 2026-08-28：积分消费端点已加服务端鉴权（rcs-server 内部专用），主题解锁改为免费本地解锁
-    const u = [...unlocked, name]; setUnlocked(u); localStorage.setItem(UNLOCKED_KEY, JSON.stringify(u))
+    const u = [...unlocked, name]; setUnlocked(u); try { localStorage.setItem(UNLOCKED_KEY, JSON.stringify(u)) } catch {}
   }
   function onSelectTheme(id: 'A' | 'B', name: string): void {
-    if (id === 'A') { setThemeA(name); localStorage.setItem(THEME_KEY + '-a', name) }
-    else { setThemeB(name); localStorage.setItem(THEME_KEY + '-b', name) }
+    if (id === 'A') { setThemeA(name); try { localStorage.setItem(THEME_KEY + '-a', name) } catch {} }
+    else { setThemeB(name); try { localStorage.setItem(THEME_KEY + '-b', name) } catch {} }
   }
 
 
