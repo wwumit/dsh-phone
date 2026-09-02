@@ -103,8 +103,9 @@ function saveCursor(c: Record<string, number>): void {
 export function apply(ctx: Context): void {
 
   // 客户端配置运行时注入：node 半把身份/线路号/端点经 tapIndex 注入 index.html（window.__DSH_PHONE_CONFIG__）
+  // webServer 经 inject 契约提供（export const inject = ['sessionQuery', 'webServer']），此处非空断言
   ctx.effect(
-    () => ctx.webServer.tapIndex((html) => injectPhoneConfig(html, buildPhoneConfig())),
+    () => ctx.webServer!.tapIndex((html) => injectPhoneConfig(html, buildPhoneConfig())),
     'dsh-phone: config injection',
   )
 
@@ -279,7 +280,7 @@ export function apply(ctx: Context): void {
         const key = sid + ':' + i + ':' + text.slice(0, 50)
         if (seen.has(key)) continue
         seen.add(key)
-        if (seen.size > SEEN_MAX) seen.delete(seen.values().next().value)
+        if (seen.size > SEEN_MAX) { const ev = seen.values().next().value; if (ev !== undefined) seen.delete(ev) }
 
         // 路由：默认回短信（来源 sms）；replyChannel 配置在此扩展（现在默认 auto = 跟随来源）
         const src = currentSource || { source: 'sms', fromNumber: NUM_A }

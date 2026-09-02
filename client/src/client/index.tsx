@@ -66,7 +66,7 @@ export function apply(ctx: ClientContext): void {
     try {
       const r = await api.sessionToken('dsh-phone', 3600)
       if (r && r.ok && r.token) {
-        cachedToken = { token: r.token, expiresAt: Date.parse(r.expiresAt) }
+        cachedToken = { token: r.token, expiresAt: r.expiresAt ? Date.parse(r.expiresAt) : 0 }
         return r.token
       }
       return null
@@ -179,7 +179,7 @@ function PhonePanel(props: {
     current: { groupId: string; name: string; members: string[] } | null
     msgs: Array<{ fromNumber: string; text: string; ts: number }>
     onLoadList(): void
-    onCreate(name: string, members: string[]): Promise<string | null>
+    onCreate(name: string, members: string[]): Promise<{ gid: string | null; error: string }>
     onOpen(groupId: string): void
     onSend(from: 'A' | 'B', text: string): Promise<{ delivered: string[]; failed: string[] }> | void
     onLeave(groupId: string, member: string): Promise<{ ok: boolean; error?: string }>
@@ -281,8 +281,9 @@ function PhonePanel(props: {
   function hangup(): void { setOpen(false); setLocal(null); props.onHangup() }
 
   const ringTone = { idle: '#64748b', ok: '#34d399', warn: t.warn, bad: '#f87171', ring: t.accent }
+  const pc = props.call?.call  // props.call 可空（TS 不随 incoming 窄化），取局部判空
   const tone: 'idle' | 'ok' | 'warn' | 'bad' | 'ring' =
-    isConnected ? 'ok' : incoming ? ((props.call.call && props.call.call.trust && (props.call.call.trust.revoked || !props.call.call.trust.active)) ? 'bad' : (props.call.call && props.call.call.trust && props.call.call.trust.level > 0 ? 'ok' : 'warn')) : 'idle'
+    isConnected ? 'ok' : incoming ? ((pc && pc.trust && (pc.trust.revoked || !pc.trust.active)) ? 'bad' : (pc && pc.trust && pc.trust.level > 0 ? 'ok' : 'warn')) : 'idle'
 
   const shellRadius = t.shape === 'squared' ? 24 : t.shape === 'retro' ? 36 : 42
   const screenRadius = t.shape === 'squared' ? 18 : t.shape === 'retro' ? 28 : 34
@@ -643,7 +644,7 @@ function PhoneOverlay(): JSX.Element {
   const [smsLog, setSmsLog] = useState<SmsMsg[]>([])
   // ── RCS 群（团队协作空间）：群列表 + 当前群 + 群消息（经 registry）──
   const [groupMsgs, setGroupMsgs] = useState<Array<{ from: string; text: string; ts: number }>>([])
-  const [groupList, setGroupList] = useState<Array<{ groupId: string; name: string; memberCount: number }>>([])
+  const [groupList, setGroupList] = useState<Array<{ groupId: string; name: string; memberCount: number; lastMsgSeq?: number }>>([])
   const [currentGroup, setCurrentGroup] = useState<{ groupId: string; name: string; members: string[]; conversationId?: string; createdBy?: string } | null>(null)
   const [groupMsgLog, setGroupMsgLog] = useState<Array<{ from?: string; fromNumber: string; text: string; ts: number; agent?: { did: string; name: string; level: number }; kind?: string; payload?: any; status?: string; seq?: number }>>([])
   const groupLastSeq = useRef<Record<string, number>>({})

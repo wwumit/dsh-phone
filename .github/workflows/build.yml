@@ -25,6 +25,11 @@ jobs:
         # --legacy-peer-deps：peer（@deepseek-ai/cordis / dsh-client-runtime）由 DSH
         # 宿主提供，公共 registry 仅 pre-release（>=0.1.0 匹配不到）。
         run: npm ci --legacy-peer-deps
+      - name: 类型检查（tsc --noEmit，P1-4）
+        working-directory: client
+        # 平台模块类型由仓库内 src/types/platform-stubs.d.ts 提供（宿主模块 CI 不存在），
+        # 使 tsc 可独立运行；新增代码类型错误即红（esbuild 构建抓不到 type-only 错误）
+        run: npx tsc --noEmit --skipLibCheck
       - name: 构建（tsdown → lib/）
         working-directory: client
         run: npm run build

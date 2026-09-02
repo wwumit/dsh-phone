@@ -260,6 +260,7 @@ export function GroupChatApp(p: AppProps): JSX.Element {
     : atCandidates
 
   async function sendGroup(): Promise<void> {
+    if (!cur) return
     const text = groupInput.trim()
     if (!text) return
     // @agent 校验：@ 的 agent 必须是群成员（群成员是号码/DID 列表）
@@ -423,7 +424,7 @@ export function GroupInfoApp(p: AppProps): JSX.Element {
 
   // 加成员（管理操作走后端 member 端点；此处用简单提示——完整权限控制是管理端职责）
   function addMembers(): void {
-    if (!addPick.length) return
+    if (!cur || !addPick.length) return
     addPick.forEach((m) => {
       fetch(`${RCS_BASE}/api/v1/phone/group/member`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -437,6 +438,7 @@ export function GroupInfoApp(p: AppProps): JSX.Element {
   }
   // 移除成员
   function removeMember(member: string): void {
+    if (!cur) return
     fetch(`${RCS_BASE}/api/v1/phone/group/member?groupId=${cur.groupId}&member=${encodeURIComponent(member)}`, {
       method: 'DELETE',
     }).then((r) => r.json()).then((d) => {
@@ -447,6 +449,7 @@ export function GroupInfoApp(p: AppProps): JSX.Element {
   // 群公告（编辑/显示）
   const [annInput, setAnnInput] = useState<string | null>(null)
   function saveAnn(): void {
+    if (!cur) return
     const text = (annInput ?? '').trim()
     if (!text) { setMsg('公告不能为空'); return }
     actions.setAnnouncement(cur.groupId, text).then((r) => {
@@ -457,12 +460,14 @@ export function GroupInfoApp(p: AppProps): JSX.Element {
   // 退出群 / 解散群
   const [confirming, setConfirming] = useState<'leave' | 'disband' | null>(null)
   function doLeave(): void {
+    if (!cur) return
     actions.leaveGroup(cur.groupId, data.ownNumber).then((r) => {
       if (r.ok) { actions.groupBack(); nav('group') }
       else { setMsg(r.error || '退出失败'); setConfirming(null) }
     })
   }
   function doDisband(): void {
+    if (!cur) return
     actions.disbandGroup(cur.groupId).then((r) => {
       if (r.ok) { actions.groupBack(); nav('group') }
       else { setMsg(r.error || '解散失败'); setConfirming(null) }

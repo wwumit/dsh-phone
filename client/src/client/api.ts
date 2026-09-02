@@ -58,7 +58,7 @@ export const api = {
 
   // ── 充值（X402 微信支付；金额由服务端定价表决定，客户端只传套餐）──
   /** 充值下单：返回微信 Native 收款码链接（code_url，需渲染成二维码） */
-  purchase: (pack: 'starter' | 'standard') =>
+  purchase: (pack: 'yuan1' | 'starter' | 'standard') =>
     req<{ ok?: boolean; out_trade_no?: string; code_url?: string; amount_cents?: number; credits?: number; base?: number; bonus?: number; error?: string }>('/api/v1/phone/credits/purchase', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ did: AGENT_DID, pack }),
@@ -83,7 +83,7 @@ export const api = {
   messages: (since = 0) => reqRcs<{ messages?: Array<any> }>(`/api/v1/phone/messages?did=${encodeURIComponent(AGENT_DID)}&since=${since}`),
   /** 上传附件（base64）→ fileId */
   uploadAttachment: (name: string, mime: string, dataB64: string) =>
-    reqRcs<{ ok?: boolean; fileId?: string; hash?: string }>('/api/v1/phone/attachment', {
+    reqRcs<{ ok?: boolean; fileId?: string; hash?: string; size?: number }>('/api/v1/phone/attachment', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ did: AGENT_DID, name, mime, data: dataB64 }),
     }),

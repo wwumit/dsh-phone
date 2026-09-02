@@ -99,7 +99,7 @@ export function base58Decode(input: string): Uint8Array {
 export async function verifyPayloadWebRaw(payload: string | object, signatureB64: string, rawKey32: Uint8Array): Promise<boolean> {
   const payloadStr = typeof payload === 'string' ? payload : canonicalJson(payload)
   try {
-    const key = await crypto.subtle.importKey('raw', rawKey32, { name: 'Ed25519' }, false, ['verify'])
+    const key = await (crypto.subtle as unknown as { importKey(fmt: string, kd: BufferSource, alg: { name: string }, extractable: boolean, usages: string[]): Promise<CryptoKey> }).importKey('raw', rawKey32 as unknown as BufferSource, { name: 'Ed25519' }, false, ['verify'])
     return await crypto.subtle.verify('Ed25519', key, base64ToBuf(signatureB64), new TextEncoder().encode(payloadStr))
   } catch {
     return false

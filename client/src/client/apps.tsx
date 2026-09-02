@@ -19,7 +19,7 @@
  * 类似 skill 的"输入输出契约"——App 只依赖契约，不依赖实现。
  */
 import React from 'react'
-import type { Theme } from '../theme'
+import type { Theme } from './theme'
 
 /** App 可用的共享数据（由 PhoneOverlay 装配注入） */
 export interface AppData {
@@ -73,7 +73,7 @@ export interface AppActions {
   nav(v: string): void
   back(): void
   sendSms(fromId: 'A' | 'B', text?: string, attachment?: any, to?: string): void
-  sendGroup(from: string, text: string): Promise<{ delivered: string[]; failed: string[]; error?: string }> | void
+  sendGroup(from: 'A' | 'B', text: string): Promise<{ delivered: string[]; failed: string[]; error?: string }> | void
   loadContacts(): void
   loadAgents(): void
   loadAccount(): void
