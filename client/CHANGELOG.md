@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.5.2] - 2026-09-02
+
+### Security
+- **签名服务 CORS Origin 白名单**（P0-1）：node 半签名端点（127.0.0.1:8098 /sign）从
+  `Access-Control-Allow-Origin: *` 改为 Origin 校验——env `DSH_PHONE_SIGN_ALLOW_ORIGIN`
+  精确源，未配置时默认放行 localhost/127.0.0.1 源，其余 Origin 一律 403。
+  堵死"任意网页可让本机 agent 私钥签任意 payload"的签名预言机路径。
+- **部署脚本脱敏**（P0-2）：`scripts/release.sh`（含生产主机信息）移出公开仓库为本地私有
+  副本；公开仓仅保留 `release.sh.example` 脱敏模板。生产主机 SSH 已改密钥认证。
+
+### Fixed
+- **新消息横幅点击必崩**（P0-3）：横幅 jump 引用 PhonePanel 内部 `nav`（组件外越界 →
+  ReferenceError）。面板 nav 现经 `registerNav` 暴露给外层，跳转经面板注册导航执行。
+
 ## [2.5.1] - 2026-09-02
 
 ### Fixed
