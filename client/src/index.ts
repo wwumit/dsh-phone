@@ -143,10 +143,33 @@ export function apply(ctx: Context): void {
 
   // ── 签名服务（回环，仅本机）：client 请求 agent 私钥签名（私钥不出 node 半）──
   // 用途：跨 agent 场景「发二维码」——B 侧签订单 payload，A 侧验签可防二维码被替换。
-  // 实现：零依赖 node http；CORS 放行（DSH 页面源跨端口调本端点）；POST /sign {payload} → {signature}
+  // 安全（P0-1 修复）：签名 = agent 身份凭证，禁止任意网页当签名预言机——
+  //   * 浏览器跨站调用必带 Origin 头（浏览器设置，不可伪造）
+  //   * 白名单：env DSH_PHONE_SIGN_ALLOW_ORIGIN（精确源，可逗号多个）；未配置时默认放行
+  //     localhost/127.0.0.1 源（本地 DSH 页面），其余源一律 403
+  //   * 无 Origin（本机 curl / node 内部）放行——能访问回环端口者已具备本机进程权限
+  // 实现：零依赖 node http；POST /sign {payload} → {signature}
   if (hasProcess && identity) {
+    const SIGN_ALLOW_ORIGIN = (env('DSH_PHONE_SIGN_ALLOW_ORIGIN', '') || '')
+      .split(',').map((s) => s.trim()).filter(Boolean)
+    function signOriginAllowed(o: string | undefined): boolean {
+      if (!o) return true
+      if (SIGN_ALLOW_ORIGIN.length > 0) return SIGN_ALLOW_ORIGIN.includes(o)
+      try {
+        const u = new URL(o)
+        return u.hostname === 'localhost' || u.hostname === '127.0.0.1'
+      } catch { return false }
+    }
     const signServer = http.createServer((req, res) => {
-      res.setHeader('Access-Control-Allow-Origin', '*')
+      const reqOrigin = req.headers.origin
+      if (!signOriginAllowed(reqOrigin)) {
+        res.writeHead(403, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'origin not allowed' }))
+        return
+      }
+      // 回显实际 Origin（若存在），不再用 * —— 白名单之外的浏览器永远看不到 ACAO
+      res.setHeader('Access-Control-Allow-Origin', reqOrigin || '')
+      res.setHeader('Vary', 'Origin')
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
       res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
       if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return }

@@ -213,6 +213,9 @@ function PhonePanel(props: {
   // 新消息通知横幅（由 PhoneOverlay 轮询触发，经 props 下发到本面板渲染）
   notif: { key: string; title: string; body: string; jump: () => void } | null
   onNotifDismiss(): void
+  // P0-3 修复：面板把自己的 nav 暴露给父（PhoneOverlay），供横幅 jump 跨层导航
+  // （nav 原是 PhonePanel 内部函数，overlay 直接引用会 ReferenceError——点击新消息横幅必崩）
+  registerNav?: (nav: (v: string) => void) => void
 }): JSX.Element {
   const t = props.theme
   const [open, setOpen] = useState(false)
@@ -228,6 +231,13 @@ function PhonePanel(props: {
   function back(): void {
     setViewStack((s) => (s.length > 1 ? s.slice(0, -1) : ['home']))
   }
+  // P0-3：始终持有最新 nav（闭包 view 最新），注册给父（overlay）供横幅 jump 导航
+  const navRefForParent = React.useRef<((v: string) => void) | null>(null)
+  navRefForParent.current = (v: string) => nav(v as View)
+  React.useEffect(() => {
+    props.registerNav?.((v: string) => navRefForParent.current?.(v))
+    return () => props.registerNav?.(() => {})
+  }, [])
   const [contacts, setContacts] = useState<Array<{ number: string; agentDid: string; displayName: string | null; level: number }> | null>(null)
   const [contactsErr, setContactsErr] = useState('')
   const [agents, setAgents] = useState<Array<{ agentDid: string; name: string; level: number; numbers: string[] }> | null>(null)
@@ -459,6 +469,9 @@ function PhonePanel(props: {
 
 function PhoneOverlay(): JSX.Element {
   const [topPanel, setTopPanel] = useState<'A' | 'B' | null>(null)
+  // P0-3：A/B 面板各自注册的 nav（横幅 jump 跨层导航用；消息来自 A 面板轮询 → 走 navA）
+  const navA = React.useRef<((v: string) => void) | null>(null)
+  const navB = React.useRef<((v: string) => void) | null>(null)
   const [themeA, setThemeA] = useState<string>(() => { try { return localStorage.getItem(THEME_KEY + '-a') || 'classic' } catch { return 'classic' } })
   const [themeB, setThemeB] = useState<string>(() => { try { return localStorage.getItem(THEME_KEY + '-b') || 'classic' } catch { return 'classic' } })
   const [unlocked, setUnlocked] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem(UNLOCKED_KEY) || '[]') } catch { return [] } })
@@ -997,9 +1010,11 @@ function PhoneOverlay(): JSX.Element {
                 key: String(latestMsg.seq || Date.now()),
                 title: isGrp ? (grpName || '群消息') : sender,
                 body: isGrp ? `${sender}：${body}` : body,
+                // P0-3：nav 是 PhonePanel 内部函数，overlay 作用域无 nav（原 ReferenceError）。
+                // 改经面板注册的 nav（横幅消息来自 AGENT_DID=A 面板轮询，导航 A 面板并置顶）
                 jump: isGrp
-                  ? async () => { const g = groupListRef.current.find((x) => x.groupId === latestMsg.groupId); if (g) { await openGroup(g.groupId); nav('group-chat') } }
-                  : () => nav('sms'),
+                  ? async () => { const g = groupListRef.current.find((x) => x.groupId === latestMsg.groupId); if (g) { await openGroup(g.groupId); setTopPanel('A'); navA.current?.('group-chat') } }
+                  : () => { setTopPanel('A'); navA.current?.('sms') },
               })
 
             }
@@ -1307,9 +1322,11 @@ function PhoneOverlay(): JSX.Element {
     <>
       <PhonePanel id="A" label={`${dispName.a} · ${MINE_NUM.A}`} floatLabel={dispName.a} ownNumber={MINE_NUM.A} otherNumber={PEER_NUM.A}
         badgeLevel={3} smsList={smsLog} onSendSms={sendSms} voice={voiceFace}
+        registerNav={(f) => { navA.current = f }}
         group={{ list: groupList, current: currentGroup, msgs: groupMsgLog, onLoadList: loadGroupList, onCreate: createGroup, onOpen: (gid) => { setCurrentGroup(null); setGroupMsgLog([]); return openGroup(gid) }, onSend: sendGroup, onLeave: leaveGroup, onDisband: disbandGroup, onAnnouncement: setAnnouncement, onBack: () => { setCurrentGroup(null); setGroupMsgLog([]) } }} onReport={reportUsage} theme={themeOf('A')} unlocked={unlocked} onUnlock={onUnlock} onSelectTheme={(n) => onSelectTheme('A', n)} top={topPanel === 'A'} onFocus={() => setTopPanel('A')} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} pos={pos.A} onDragStart={(e) => startDrag('A', e)} justDragged={justDragged} account={account} checkAgentRegistered={checkAgentRegistered} registerAgent={registerAgent} checkOwnerRegistered={checkOwnerRegistered} registerOwner={registerOwner} loadAccount={loadAccount} applyAccount={applyAccount} notif={notif} onNotifDismiss={() => setNotif(null)} />
       <PhonePanel id="B" label={`${dispName.b} · ${MINE_NUM.B}`} floatLabel={dispName.b} ownNumber={MINE_NUM.B} otherNumber={PEER_NUM.B}
         badgeLevel={3} smsList={smsLog} onSendSms={sendSms} voice={voiceFace}
+        registerNav={(f) => { navB.current = f }}
         group={{ list: groupList, current: currentGroup, msgs: groupMsgLog, onLoadList: loadGroupList, onCreate: createGroup, onOpen: (gid) => { setCurrentGroup(null); setGroupMsgLog([]); return openGroup(gid) }, onSend: sendGroup, onLeave: leaveGroup, onDisband: disbandGroup, onAnnouncement: setAnnouncement, onBack: () => { setCurrentGroup(null); setGroupMsgLog([]) } }} onReport={reportUsage} theme={themeOf('B')} unlocked={unlocked} onUnlock={onUnlock} onSelectTheme={(n) => onSelectTheme('B', n)} top={topPanel === 'B'} onFocus={() => setTopPanel('B')} call={call} onDial={onDial} onAnswer={onAnswer} onHangup={onHangup} pos={pos.B} onDragStart={(e) => startDrag('B', e)} justDragged={justDragged} account={account} checkAgentRegistered={checkAgentRegistered} registerAgent={registerAgent} checkOwnerRegistered={checkOwnerRegistered} registerOwner={registerOwner} loadAccount={loadAccount} applyAccount={applyAccount} notif={notif} onNotifDismiss={() => setNotif(null)} />
     </>
   )
