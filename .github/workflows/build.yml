@@ -1,0 +1,37 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - name: 安装依赖
+        working-directory: client
+        # --legacy-peer-deps：peer（@deepseek-ai/cordis / dsh-client-runtime）由 DSH
+        # 宿主运行时提供，公共 registry 仅发布 pre-release（>=0.1.0 匹配不到）；
+        # tsdown 构建已将其 external，无需物理安装。
+        run: npm ci --legacy-peer-deps
+      - name: 构建（tsdown → lib/）
+        working-directory: client
+        run: npm run build
+      - name: 产物完整性
+        working-directory: client
+        run: |
+          test -s lib/index.js || { echo "✗ lib/index.js 缺失或为空"; exit 1; }
+          test -s lib/client.js || { echo "✗ lib/client.js 缺失或为空"; exit 1; }
+          grep -q 'window.__ModuleLoader__.load' lib/client.js || { echo "✗ client banner 缺失"; exit 1; }
+          grep -q '@wwumit/dsh-phone' lib/client.js || { echo "✗ plugin id 缺失"; exit 1; }
+          echo "✓ index.js + client.js + banner + id 全部就位"
