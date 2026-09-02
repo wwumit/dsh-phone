@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+#
+# dsh-phone 发布/部署脚本（EXAMPLE——脱敏模板，供参考结构，不包含任何真实主机/路径）
+#
+# ⚠️ 安全说明（2026-09-02 P0-2）：
+#   真实版本含生产主机（IP/用户）与部署路径，已从公开仓库移除。
+#   真实部署脚本为本地私有副本：backups/dsh-phone-release-20260902/release.sh
+#   （不随仓库分发）。任何新部署机信息禁止写入本文件或提交进公开仓。
+#
+# 流程：build 构建+自检 / deploy 构建+部署 / publish git push + npm publish
+# 用法：./scripts/release.sh.example {build|deploy|publish|all}
+#
+# SSH 认证：推荐密钥（禁止密码认证登录公网主机）；见 docs/（部署手册）
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CLIENT_DIR="$REPO_ROOT/client"
+LIB_DIR="$CLIENT_DIR/lib"
+NPM_CACHE="${NPM_CACHE:-$REPO_ROOT/.npm-cache}"
+
+# ── 环境配置（占位，按部署清单填——不提交真实值）──
+# 本地开发端
+LOCAL_DSH_DIR="<local-dsh-dir>"
+LOCAL_DSH_HOME="<local-dsh-home>"
+LOCAL_PORT="<local-port>"
+
+# 远端（密钥认证；主机从部署清单取，勿写死在此文件）
+# REMOTE_HOST="<user>@<host>"
+# REMOTE_LIB="<remote-lib-path>"
+# REMOTE_PORT="<port>"
+
+log()  { echo -e "\n\033[1;36m==> $*\033[0m"; }
+fail() { echo -e "\033[1;31m✗ $*\033[0m" >&2; exit 1; }
+
+# ── 1. build ──
+do_build() {
+  log "构建统一 client.js / index.js"
+  (cd "$CLIENT_DIR" && npx tsdown)
+  ls -la "$LIB_DIR"/index.js "$LIB_DIR"/client.js 2>/dev/null
+}
+
+# ── 2. verify：自检无身份烙入 ──
+do_verify() {
+  log "自检：client.js 不应烙入任何身份/号码"
+  local bad=0
+  # 生产环境使用时应按实际身份补全检查列表（不写死具体 DID 到公开文件）
+  for kw in "did:cha2a:agent:" ; do
+    local c
+    c="$(grep -oE "$kw" "$LIB_DIR/client.js" 2>/dev/null | wc -l | tr -d ' ' || true)"
+    if [ "$c" != "0" ]; then echo "  ✗ 发现 $kw ×$c"; bad=1; fi
+  done
+  [ "$bad" = "1" ] && fail "client.js 仍含身份字样，停止"
+  echo "  ✓ 无身份/号码烙入（运行时注入检查按部署清单扩展）"
+}
+
+# ── 3. publish ──
+do_publish() {
+  log "git push"
+  git -C "$REPO_ROOT" push origin main
+  log "npm publish"
+  (cd "$CLIENT_DIR" && npm --cache "$NPM_CACHE" publish)
+  local ver
+  ver="$(cd "$CLIENT_DIR" && node -p 'require("./package.json").version')"
+  log "发布完成：@wwumit/dsh-phone $ver"
+}
+
+# ── 主流程 ──
+case "${1:-}" in
+  build)   do_build; do_verify ;;
+  deploy)  echo "⚠ 部署主机信息在私有副本，请用私有 release.sh（本文件仅模板）" >&2; exit 1 ;;
+  publish) do_publish ;;
+  all)     echo "⚠ 同 deploy：请用私有副本" >&2; exit 1 ;;
+  *)
+    echo "用法: $0 {build|deploy|publish|all}" >&2
+    echo "  真实部署见本地私有副本（backups/dsh-phone-release-20260902/release.sh）"
+    exit 1
+    ;;
+esac
