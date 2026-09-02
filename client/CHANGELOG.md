@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.5.1] - 2026-09-02
+
+### Fixed
+- **board/沙箱 localStorage 安全**：saveRead（群读取进度）、主题初始化/onUnlock/onSelectTheme 的
+  localStorage 读写加 try-catch——OpenClaw board 最内层 sandbox iframe 禁 localStorage 时
+  不再抛 SecurityError 中断 UI
+- **createGroup 自动包含创建者**：服务端不自动加 creator，建群后创建者不再缺失（此前退群
+  报 member not in group）
+- **package.json 中文逗号笔误**（2.5.0 引入，修正）
+- **package-lock 多平台化**：darwin + linux-x64 binding（rolldown/yuku-codegen/yuku-parser）
+  双入 lock——CI/linux 上 npm ci 不再缺 native binding（npm/cli#4828 同类）
+
+### CI
+- GitHub Actions build workflow（push/PR：npm ci → tsdown 双半构建 → 产物完整性）
+
 ## [2.5.0] - 2026-09-01
 
 ### Added
