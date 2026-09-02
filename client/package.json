@@ -17,7 +17,8 @@
   },
   "scripts": {
     "build": "tsdown",
-    "watch": "tsdown --watch"
+    "watch": "tsdown --watch",
+    "test": "node --experimental-strip-types --test"
   },
   "keywords": [
     "dsh-plugin",

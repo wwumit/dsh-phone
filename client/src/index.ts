@@ -86,8 +86,9 @@ const REPLY_INTERVAL = 2500          // 轮询间隔（回复路由时延大头�
 const SEEN_MAX = 200                 // 已处理消息去重上限
 // 轮询游标持久化：重启后不重放历史回复（游标按 sid 记录已处理消息数；inbox 记录收件箱 seq）
 // 游标文件按 DID 命名空间化（设备通用、各 agent 各一份）；一次性把旧全局文件迁移过来，避免换名后游标归零重放历史回复
-const CURSOR_FILE = path.join(env('DSH_HOME', '/tmp'), `dsh-phone-cursor-${AGENT_DID.replace(/[^A-Za-z0-9._-]/g, '_')}.json`)
-const OLD_CURSOR_FILE = path.join(env('DSH_HOME', '/tmp'), 'dsh-phone-cursor.json')
+const PHONE_STATE_DIR = env('DSH_HOME', path.join(env('HOME', ''), '.dsh')) // P2: 不落 /tmp（清理致游标归零重放）；HOME 缺省才空
+const CURSOR_FILE = path.join(PHONE_STATE_DIR, `dsh-phone-cursor-${AGENT_DID.replace(/[^A-Za-z0-9._-]/g, '_')}.json`)
+const OLD_CURSOR_FILE = path.join(PHONE_STATE_DIR, 'dsh-phone-cursor.json')
 try {
   if (!fs.existsSync(CURSOR_FILE) && fs.existsSync(OLD_CURSOR_FILE)) fs.renameSync(OLD_CURSOR_FILE, CURSOR_FILE)
 } catch { /* 迁移失败忽略（仅回到新游标，不影响功能） */ }

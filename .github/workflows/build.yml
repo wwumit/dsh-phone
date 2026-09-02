@@ -30,6 +30,9 @@ jobs:
         # 平台模块类型由仓库内 src/types/platform-stubs.d.ts 提供（宿主模块 CI 不存在），
         # 使 tsc 可独立运行；新增代码类型错误即红（esbuild 构建抓不到 type-only 错误）
         run: npx tsc --noEmit --skipLibCheck
+      - name: 测试（node:test，P1-6 canonicalJson 确定性）
+        working-directory: client
+        run: npm test
       - name: 构建（tsdown → lib/）
         working-directory: client
         run: npm run build

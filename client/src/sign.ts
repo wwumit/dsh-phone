@@ -11,18 +11,9 @@
  *    与 server 端 verify 端点对齐——详见 cha2a-registry 验签端点）
  */
 import crypto from 'crypto'
+import { canonicalJson } from './canonical-json.ts'
 
-/** 稳定 JSON 序列化：keys 排序 + 紧凑（对齐验签端的规范化） */
-export function canonicalJson(obj: unknown): string {
-  return stableStringify(obj)
-}
-
-function stableStringify(obj: unknown): string {
-  if (obj === null || typeof obj !== 'object') return JSON.stringify(obj)
-  if (Array.isArray(obj)) return '[' + obj.map(stableStringify).join(',') + ']'
-  const keys = Object.keys(obj as Record<string, unknown>).sort()
-  return '{' + keys.map((k) => JSON.stringify(k) + ':' + stableStringify((obj as Record<string, unknown>)[k])).join(',') + '}'
-}
+export { canonicalJson } from './canonical-json.ts'  // P1-6: 共享单一实现
 
 /** 用 Ed25519 私钥（pkcs8 DER base64）对 payload 签名，返回 base64 签名 */
 export function signPayload(payload: string | object, privateKeyB64: string): string {

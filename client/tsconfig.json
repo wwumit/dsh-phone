@@ -28,7 +28,8 @@
       "@deepseek-ai/dsh-client-runtime/client": [
         "../../../../../deepseek-harness/packages/client/runtime/src/client/index.ts"
       ]
-    }
+    },
+    "allowImportingTsExtensions": true
   },
   "include": [
     "src"

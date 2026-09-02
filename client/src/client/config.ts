@@ -14,6 +14,7 @@ interface PhoneRuntimeConfig {
   rcsBase: string
   agentDid: string
   signPort?: number
+  storeUrl?: string
   numA: string
   numB: string
 }
@@ -43,7 +44,7 @@ export const OWNER_DID = AGENT_DID.startsWith('did:cha2a:agent:')
 // 终端缺省显示名（通用占位；实际显示名 = registry 注册名 / RCS profile，见 index.tsx loadNames）
 export const AGENT_LABEL = 'Agent'
 export const OWNER_LABEL = 'Owner'
-export const STORE_URL = 'https://compliancehub.cn/store/'
+export const STORE_URL = INJ.storeUrl || PHONE_BASE + '/store/'  // P2: 默认跟随 registryBase（域名无关）；可显式覆盖
 
 // 双面板线路号（同页两部电话演示）；由 node 半注入，注入缺失时为空（未配置）
 export const MINE_NUM = {

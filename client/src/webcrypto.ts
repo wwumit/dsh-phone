@@ -1,3 +1,4 @@
+import { canonicalJson } from './canonical-json.ts'
 /**
  * dsh-phone WebCrypto 签名工具（浏览器半）
  *
@@ -16,17 +17,7 @@
  *   const ok = await verifyPayloadWeb(payload, sig, publicKey)
  */
 
-/** 稳定 JSON 序列化：keys 排序 + 紧凑（对齐验签端） */
-export function canonicalJson(obj: unknown): string {
-  return stableStringify(obj)
-}
-
-function stableStringify(obj: unknown): string {
-  if (obj === null || typeof obj !== 'object') return JSON.stringify(obj)
-  if (Array.isArray(obj)) return '[' + obj.map(stableStringify).join(',') + ']'
-  const keys = Object.keys(obj as Record<string, unknown>).sort()
-  return '{' + keys.map((k) => JSON.stringify(k) + ':' + stableStringify((obj as Record<string, unknown>)[k])).join(',') + '}'
-}
+export { canonicalJson } from './canonical-json.ts'  // P1-6: 共享单一实现
 
 function base64ToBuf(b64: string): ArrayBuffer {
   const bin = atob(b64)
