@@ -19,6 +19,7 @@ import { PHONE_BASE, RCS_BASE, AGENT_DID, OWNER_DID, MINE_NUM, PEER_NUM, NUM_A, 
 import { loadAgentProfile } from './profile'
 import { THEMES, SF, type Theme } from './theme'
 import { api, ApiError } from './api'
+import { signViaLocal } from './sign-local'
 import { registerApp, getApp, type AppData, type AppActions, type AppProps } from './apps'
 import { registerBuiltinApps } from './apps/index'
 import { HomeApp } from './apps/home'
@@ -765,7 +766,13 @@ function PhoneOverlay(): JSX.Element {
     const conv = currentGroup.conversationId ? { conversationId: currentGroup.conversationId } : {}
     const r = await fetch(`${RCS_BASE}/api/v1/phone/group/message`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: speakAs, fromNumber: speakNumber, groupId: currentGroup.groupId, ...conv, text }),
+      body: JSON.stringify({ from: speakAs, fromNumber: speakNumber, groupId: currentGroup.groupId, ...conv, text,
+        // P1-5 群消息签名：A 面板（agent 身份）→ 签 {text} 随 payload（rcs-server 群端点支持 payload 传递）
+        ...(speakAs === AGENT_DID ? await (async () => {
+          const sig = await signViaLocal({ text })
+          return sig ? { payload: { signature: sig } } : {}
+        })() : {}),
+      }),
     }).catch(() => null)
     // 信任门禁/广播错误透传给 UI（409 = @agent 等级低于门禁；后端检查所有 @agent）
     if (r && r.status >= 400) {
@@ -970,7 +977,14 @@ function PhoneOverlay(): JSX.Element {
         if (up.ok) att = { ...attachment, fileId: up.fileId, hash: up.hash }
       } catch { return }
     }
-    const body: any = { from: speakAs, fromNumber: speakNumber, to, text: text || undefined, attachment: att ? { fileId: att.fileId, name: att.name, size: att.size, hash: att.hash } : undefined }
+    // P1-5 消息签名：A 面板（agent 身份）纯文本短信 → 签 {text} 随 payload 发出（对端可验）。
+    // 渐进策略：签名失败（无私钥/8098 不可达）不阻断发送（发无签消息），待 agent 全量注册 #agent-key 后收紧。
+    let sigPayload: Record<string, unknown> | undefined
+    if (!panelIsB && text && !attachment) {
+      const sig = await signViaLocal({ text })
+      if (sig) sigPayload = { signature: sig }
+    }
+    const body: any = { from: speakAs, fromNumber: speakNumber, to, text: text || undefined, attachment: att ? { fileId: att.fileId, name: att.name, size: att.size, hash: att.hash } : undefined, ...(sigPayload ? { payload: sigPayload } : {}) }
     // 检查响应状态：402（余额不足）/其他错误必须提示，不能"假成功"（本地显示已发送但实际未发出）
     try {
       const r = await fetch(`${RCS_BASE}/api/v1/phone/message`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
@@ -1025,7 +1039,8 @@ function PhoneOverlay(): JSX.Element {
             fromNumber: m.fromNumber || '对端', text: m.text || undefined,
             attachment: m.attachment ? { name: m.attachment.name, size: m.attachment.size, hash: m.attachment.hash, fileId: m.attachment.fileId, url: `${RCS_BASE}/api/v1/phone/attachment/${m.attachment.fileId}`, type: 'application/octet-stream' } : undefined,
             ts: Date.parse(m.at) || Date.now(), seq: m.seq,
-          }))])
+            ...(typeof m.from === 'string' && m.from.startsWith('did:') ? { from: m.from } : {}),
+            ...(m.payload ? { payload: m.payload } : {}) }))])
           // 群消息：当前打开了群 → 增量追加（seq > 已处理游标，防与 openGroup 全量拉取重复）
           if (currentGroup) {
             const gid = currentGroup.groupId

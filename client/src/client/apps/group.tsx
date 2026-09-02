@@ -7,7 +7,7 @@ import React, { useEffect, useState } from 'react'
 import { type AppProps } from '../apps'
 import { AppBar } from '../theme'
 import { PHONE_BASE, RCS_BASE, AGENT_DID, agentKey } from '../config'
-import { RechargeSigBadge } from './recharge-badge'
+import { SigBadge } from './sig-badge'
 import { api } from '../api'
 
 // 群已读游标（localStorage：groupId → 已读 seq；未读数 = lastMsgSeq - readSeq；按 DID 命名空间化）
@@ -345,7 +345,7 @@ export function GroupChatApp(p: AppProps): JSX.Element {
                     )
                     : renderText(m.text || '')}
                 </div>
-                <RechargeSigBadge payload={m.payload} from={m.from} />
+                <SigBadge from={m.from} payload={m.payload} text={m.text} />
                 <div style={{ fontSize: 8, color: t.muted, marginTop: 2, padding: '0 2px' }}>
                   {m.ts ? new Date(m.ts).toTimeString().slice(0, 5) : ''}{m.status === 'recalled' ? ' · 已撤回' : ''}
                 </div>

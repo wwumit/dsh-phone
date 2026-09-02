@@ -7,7 +7,7 @@ import { type AppProps } from '../apps'
 import { AppBar } from '../theme'
 import { api } from '../api'
 import { PHONE_BASE, AGENT_DID } from '../config'
-import { RechargeSigBadge } from './recharge-badge'
+import { SigBadge } from './sig-badge'
 
 export function SmsApp(p: AppProps): JSX.Element {
   const { t, data, actions, back } = p
@@ -113,7 +113,7 @@ export function SmsApp(p: AppProps): JSX.Element {
                 </span>
               ) : m.text}
             </span>
-            <RechargeSigBadge payload={m.payload} from={m.from} />
+            <SigBadge from={m.from} payload={m.payload} text={m.text} />
           </div>
         ))}
       </div>
