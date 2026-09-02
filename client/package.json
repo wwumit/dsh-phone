@@ -1,6 +1,6 @@
 {
   "name": "@wwumit/dsh-phone",
-  "version": "2.5.2",
+  "version": "2.5.3",
   "description": "Agent phone client plugin — phone dialer overlay in DSH web UI, consuming CHA2A phone directory",
   "type": "module",
   "main": "lib/index.js",

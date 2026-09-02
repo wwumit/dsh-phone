@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.5.3] - 2026-09-02
+
+### Quality / 类型安全（P1-4）
+- **CI 类型检查门禁**：tsc --noEmit 加入 CI（此前 esbuild 构建抓不到 type-only 错误）
+- 修复 25+ 条真实 tsc 错误：import 路径错、createGroup/onCreate/sendGroup 签名统一、
+  group.tsx/index.tsx 7+7 处空值守卫、recharge 类型补全（purchase yuan1 / upload size——
+  服务端上传响应实测含 size）、webcrypto Ed25519 cast 等
+- 平台模块类型 stub（src/types/platform-stubs.d.ts）：宿主 @deepseek-ai/* 模块 CI/发布环境
+  无源码，本仓库可独立 tsc 0 错（构建仍 external）
+
+### 内部（P1-6）
+- **canonicalJson 单一实现**：sign.ts / webcrypto.ts 两份逐字重复 → src/canonical-json.ts 共享
+  （消除跨端漂移风险）；新增 8 项确定性测试（排序/嵌套/数组/unicode/签名往返/稳定性向量），
+  CI 跑 npm test
+
+### Changed
+- **STORE_URL 跟随 registryBase**（此前写死 compliancehub.cn）：换服务域名时商店地址自动跟随；
+  仍可用 storeUrl 显式覆盖
+- **轮询游标不再落 /tmp**（DSH_HOME 缺省 → HOME/.dsh，与身份文件同路径）：系统清理不再
+  导致游标归零重放历史回复
+- README 更新：版本 2.5.3 + 充值（2.4）/签名收款码（2.5）功能 + P0 安全说明
+
 ## [2.5.2] - 2026-09-02
 
 ### Security
