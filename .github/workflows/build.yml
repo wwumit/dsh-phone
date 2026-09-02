@@ -24,6 +24,14 @@ jobs:
         # 宿主运行时提供，公共 registry 仅发布 pre-release（>=0.1.0 匹配不到）；
         # tsdown 构建已将其 external，无需物理安装。
         run: npm ci --legacy-peer-deps
+      - name: 补装 rolldown 平台 binding（npm/cli#4828：lock 为 mac 生成仅含 darwin-arm64，CI 为 linux-x64）
+        working-directory: client
+        run: |
+          V=$(node -p "require('./node_modules/rolldown/package.json').version")
+          if [ ! -d "node_modules/@rolldown/binding-linux-x64-gnu" ]; then
+            npm install --no-save "@rolldown/binding-linux-x64-gnu@$V" --legacy-peer-deps
+          fi
+          test -d node_modules/@rolldown/binding-linux-x64-gnu && echo "✓ linux binding 就位"
       - name: 构建（tsdown → lib/）
         working-directory: client
         run: npm run build
