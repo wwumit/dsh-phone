@@ -20,18 +20,12 @@ jobs:
           cache-dependency-path: client/package-lock.json
       - name: 安装依赖
         working-directory: client
-        # --legacy-peer-deps：peer（@deepseek-ai/cordis / dsh-client-runtime）由 DSH
-        # 宿主运行时提供，公共 registry 仅发布 pre-release（>=0.1.0 匹配不到）；
-        # tsdown 构建已将其 external，无需物理安装。
-        run: npm ci --legacy-peer-deps
-      - name: 补装 rolldown 平台 binding（npm/cli#4828：lock 为 mac 生成仅含 darwin-arm64，CI 为 linux-x64）
-        working-directory: client
-        run: |
-          V=$(node -p "require('./node_modules/rolldown/package.json').version")
-          if [ ! -d "node_modules/@rolldown/binding-linux-x64-gnu" ]; then
-            npm install --no-save "@rolldown/binding-linux-x64-gnu@$V" --legacy-peer-deps
-          fi
-          test -d node_modules/@rolldown/binding-linux-x64-gnu && echo "✓ linux binding 就位"
+        # npm install（全量解析）而非 npm ci：package-lock.json 在 mac 上生成，packages 仅
+        # 展开 darwin 平台 binding（rolldown / yuku-codegen 等 native 包）；ubuntu 上 npm ci
+        # 严格按 lock 恢复 → 缺 linux binding → 构建失败（npm/cli#4828 同类）。全量解析会按
+        # 当前平台补装全部 native binding。--legacy-peer-deps：peer（@deepseek-ai/cordis /
+        # dsh-client-runtime）由 DSH 宿主提供，公共 registry 仅 pre-release（>=0.1.0 匹配不到）。
+        run: npm install --legacy-peer-deps --no-save
       - name: 构建（tsdown → lib/）
         working-directory: client
         run: npm run build
